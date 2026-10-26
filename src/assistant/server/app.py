@@ -280,7 +280,7 @@ def create_app(
     ) -> list[dict[str, Any]]:
         """Lấy danh sách hoặc tìm kiếm trí nhớ dài hạn."""
         if query and query.strip():
-            return app_mem_store.search_memories(query.strip(), limit=50)
+            return app_mem_store.search_memories_hybrid(query.strip(), top_k=50)
         return app_mem_store.list_memories(category=category, limit=100)
 
     @app.post("/api/memories", response_model=dict[str, Any], dependencies=[Depends(require_session_token)])

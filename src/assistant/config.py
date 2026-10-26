@@ -28,6 +28,7 @@ class Config:
     ui_port: int
     log_level: str
     telegram_chat_id: str = ""
+    embedding_model: str = "nomic-embed-text"
 
 
 # Bí danh cho Config để tương thích thuận nghịch
@@ -174,6 +175,13 @@ def load_config(
         os.getenv("TELEGRAM_CHAT_ID") or notifications_sec.get("telegram_chat_id") or ""
     ).strip()
 
+    # 8. embedding_model
+    embedding_model = str(
+        os.getenv("EMBEDDING_MODEL")
+        or models_sec.get("embedding_model")
+        or "nomic-embed-text"
+    ).strip()
+
     config = Config(
         workspace_dir=workspace_path,
         data_dir=data_path,
@@ -187,6 +195,7 @@ def load_config(
         ui_port=ui_port,
         log_level=log_level,
         telegram_chat_id=telegram_chat_id,
+        embedding_model=embedding_model,
     )
 
 

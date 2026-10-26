@@ -297,10 +297,44 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   - Giảm độ trễ phản hồi chat, tối ưu hóa I/O cho phần cứng Windows SSD, tuân thủ Nguyên tắc 7 (Mã sạch & kiểm thử) và Nguyên tắc 10 (Ghi nhận quyết định kỹ thuật).
 - **Thư viện mới**: Không có.
 
-
-
-
-
-
+### [2026-10-27] Nâng cấp Trí nhớ Dài hạn (Long-term Memory) sang cơ chế Hybrid Search (FTS5 BM25 + Ollama Embeddings + RRF)
+- **Bối cảnh**:
+  - Cơ chế truy xuất trí nhớ ban đầu chỉ dựa vào bảng ảo SQLite FTS5 (so khớp từ khóa chính xác unicode61). Khi người dùng hỏi bằng từ đồng nghĩa hoặc câu hỏi mang tính ngữ nghĩa trừu tượng (ví dụ: query "quy tắc đặt tên" không chứa từ "cách đặt file"), FTS5 không thể truy xuất được các dữ kiện liên quan.
+- **Phương án đã chọn**:
+  1. Module `src/assistant/memory/embeddings.py`:
+     - Kết nối tới endpoint `/api/embeddings` của Ollama thông qua thư viện `httpx` đã có sẵn trong dự án (hỗ trợ cả sync và async, model mặc định `nomic-embed-text` hoặc `all-minilm`).
+     - Triển khai hàm tuần tự hóa vector float32 thành nhị phân `BLOB` (`float_list_to_blob`) và ngược lại (`blob_to_float_list`) bằng module chuẩn `struct`.
+     - Triển khai hàm tính Cosine Similarity thuần Python bằng module `math`.
+     - Tuyệt đối tuân thủ Nguyên tắc 11: không cài đặt thêm numpy, scipy, chromadb hay faiss.
+     - Triển khai thuật toán Reciprocal Rank Fusion (`reciprocal_rank_fusion`) với hằng số $k=60$ để hợp nhất thứ hạng giữa FTS5 BM25 và Vector Similarity.
+  2. Bảng `memory_embeddings` trong SQLite (`src/assistant/memory/store.py`):
+     - `memory_id TEXT PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, embedding BLOB NOT NULL, created_at TEXT NOT NULL`.
+     - Tạo chỉ mục `idx_memory_embeddings_created ON memory_embeddings(created_at)`.
+  3. Cập nhật `MemoryStore`:
+     - `add_memory`: tự động sinh vector embedding qua Ollama và lưu song song vào bảng `memory_embeddings`.
+     - `update_memory`: tự động cập nhật lại vector embedding khi nội dung trí nhớ thay đổi.
+     - `delete_memory`: xoá sạch dữ liệu trong `memories_fts` và `memory_embeddings`.
+     - `search_memories_hybrid(query, top_k=10)`:
+       + Lấy kết quả từ FTS5.
+       + Tính cosine similarity giữa vector truy vấn và toàn bộ vector trong database.
+       + Kết hợp kết quả bằng Reciprocal Rank Fusion (RRF: `score = 1 / (60 + rank)`).
+       + Fallback mượt mà về tìm kiếm FTS5/LIKE nếu Ollama tắt hoặc model embedding chưa tải.
+  4. Nạp System Prompt và Tools:
+     - `ConversationContext.get_relevant_memories(store, max_tokens=600, max_memories=15, query=...)`: ưu tiên gọi `search_memories_hybrid` dựa trên query (hoặc tin nhắn gần nhất của user).
+     - `src/assistant/server/ws.py` & `src/assistant/main.py`: truyền query của người dùng vào `get_relevant_memories()`.
+     - `recall_memories` trong `memory_tools.py` và route GET `/api/memories` trong `server/app.py`: sử dụng `search_memories_hybrid`.
+  5. Cấu hình (`config.py` & `settings.toml`):
+     - Bổ sung `embedding_model = "nomic-embed-text"` (có thể cấu hình qua file TOML hoặc biến môi trường `EMBEDDING_MODEL`).
+  6. Kiểm thử tự động (`tests/test_hybrid_memory.py`):
+     - Kiểm thử chuyển đổi vector blob float32.
+     - Kiểm thử Cosine Similarity thuần Python (trùng khớp, trực giao, ngược chiều).
+     - Kiểm thử tính toán xếp hạng RRF.
+     - Kiểm thử tìm kiếm từ đồng nghĩa (query "quy tắc đặt tên" khớp thành công memory "cách đặt file YYYY-MM-DD").
+     - Kiểm thử fallback mượt mà khi Ollama offline.
+     - Kiểm thử đồng bộ cập nhật/xóa vector.
+     - Kiểm thử nạp trí nhớ hybrid vào `ConversationContext`.
+- **Lý do**:
+  - Tối ưu hóa vượt bậc khả năng hiểu ngữ nghĩa và gợi nhớ của trợ lý, duy trì hoạt động cục bộ 100% trên Windows và giữ vững nguyên tắc bảo mật, không phụ thuộc thư viện nặng.
+- **Thư viện mới**: Không có (sử dụng thư viện chuẩn `math`, `struct` và `httpx` đã có).
 
 

@@ -24,6 +24,9 @@ local_model = "qwen2.5:14b"
 # Địa chỉ máy chủ Ollama
 ollama_host = "http://127.0.0.1:11434"
 
+# Model embedding cho tìm kiếm ngữ nghĩa trí nhớ (nomic-embed-text, all-minilm)
+embedding_model = "nomic-embed-text"
+
 # Ngưỡng cảnh báo số request Gemini mỗi ngày
 daily_soft_limit = 1000
 

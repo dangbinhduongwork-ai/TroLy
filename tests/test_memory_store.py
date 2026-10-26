@@ -26,12 +26,14 @@ def test_memory_store_init_and_wal(tmp_path: Path) -> None:
         assert "memories" in tables
         assert "memories_fts" in tables
         assert "messages_fts" in tables
+        assert "memory_embeddings" in tables
 
         # Kiểm tra sự tồn tại của các chỉ mục tối ưu truy vấn
         cur = conn.execute("SELECT name FROM sqlite_master WHERE type='index';")
         indices = [r[0] for r in cur.fetchall()]
         assert "idx_messages_conv_created" in indices
         assert "idx_memories_category" in indices
+        assert "idx_memory_embeddings_created" in indices
 
     # Kiểm tra các PRAGMA tối ưu đọc/ghi SSD từ kết nối của store
     conn_store = store._get_connection()

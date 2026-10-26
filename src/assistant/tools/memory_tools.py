@@ -74,10 +74,10 @@ def recall_memories(query: str, limit: int = 10) -> dict[str, Any]:
 
     store = _get_store()
 
-    # 1. Tìm trong bảng memories
-    memories = store.search_memories(q_clean, limit=limit)
+    # 1. Tìm trong bảng memories bằng Hybrid Search (FTS5 + Vector qua RRF)
+    memories = store.search_memories_hybrid(q_clean, top_k=limit)
     if not memories:
-        # Nếu FTS không khớp, liệt kê các memory gần nhất
+        # Nếu không khớp, liệt kê các memory gần nhất
         memories = store.list_memories(limit=5)
 
     # 2. Tìm trong tin nhắn cũ

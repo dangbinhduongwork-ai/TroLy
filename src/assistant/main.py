@@ -559,8 +559,13 @@ async def _interactive_chat_loop(
         # Kiểm tra nén ngữ cảnh nếu vượt ngưỡng token
         await context.check_and_compress(local_provider=router.ollama_provider)
 
-        # Tự động chèn các trí nhớ quan trọng vào system prompt
-        active_memories = context.get_relevant_memories(store, max_tokens=600, max_memories=15)
+        # Tự động chèn các trí nhớ quan trọng vào system prompt (Hybrid Search theo nội dung người dùng hỏi)
+        active_memories = context.get_relevant_memories(
+            store,
+            max_tokens=600,
+            max_memories=15,
+            query=user_input,
+        )
         sys_prompt = get_system_prompt(
             timezone_str=config.timezone,
             memories=active_memories,

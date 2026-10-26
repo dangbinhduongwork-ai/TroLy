@@ -9,6 +9,7 @@ Bật chế độ WAL (Write-Ahead Logging) để tối ưu hiệu năng đọc/
 """
 
 from datetime import datetime
+import logging
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -16,6 +17,15 @@ import uuid
 import zoneinfo
 
 from assistant.config import load_config
+from assistant.memory.embeddings import (
+    blob_to_float_list,
+    cosine_similarity,
+    float_list_to_blob,
+    get_embedding_sync,
+    reciprocal_rank_fusion,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_iso_time(timezone_str: str = "Asia/Ho_Chi_Minh") -> str:
@@ -30,12 +40,24 @@ def get_current_iso_time(timezone_str: str = "Asia/Ho_Chi_Minh") -> str:
 class MemoryStore:
     """Quản trị cơ sở dữ liệu SQLite của ứng dụng Trợ Lý AI."""
 
-    def __init__(self, db_path: Path | None = None) -> None:
-        if db_path is None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        ollama_host: str | None = None,
+        embedding_model: str | None = None,
+    ) -> None:
+        if db_path is None or ollama_host is None or embedding_model is None:
             config = load_config(create_dirs=True)
-            db_path = config.data_dir / "assistant.db"
+            if db_path is None:
+                db_path = config.data_dir / "assistant.db"
+            if ollama_host is None:
+                ollama_host = getattr(config, "ollama_host", "http://127.0.0.1:11434")
+            if embedding_model is None:
+                embedding_model = getattr(config, "embedding_model", "nomic-embed-text")
 
         self.db_path = db_path
+        self.ollama_host = ollama_host or "http://127.0.0.1:11434"
+        self.embedding_model = embedding_model or "nomic-embed-text"
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -119,12 +141,27 @@ class MemoryStore:
                 """
             )
 
-            # 6. Các chỉ mục (INDEX) tăng tốc truy vấn thường xuyên
+            # 6. Bảng lưu trữ vector embeddings cho memories (float32 BLOB)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_embeddings (
+                    memory_id TEXT PRIMARY KEY,
+                    embedding BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                );
+                """
+            )
+
+            # 7. Các chỉ mục (INDEX) tăng tốc truy vấn thường xuyên
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at);"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created ON memory_embeddings(created_at);"
             )
 
     # =========================================================================
@@ -309,8 +346,9 @@ class MemoryStore:
         category: str,
         content: str,
         source_conv_id: str | None = None,
+        embedding: list[float] | None = None,
     ) -> str:
-        """Lưu một dữ kiện mới vào trí nhớ dài hạn và đồng bộ FTS5."""
+        """Lưu một dữ kiện mới vào trí nhớ dài hạn, đồng bộ FTS5 và sinh vector embedding."""
         mem_id = str(uuid.uuid4())
         now = get_current_iso_time()
         cat_clean = category.strip().lower()
@@ -331,6 +369,33 @@ class MemoryStore:
                 (mem_id, cat_clean, content_clean),
             )
 
+        # Tự động sinh vector embedding và lưu song song
+        vec = embedding
+        if vec is None:
+            try:
+                vec = get_embedding_sync(
+                    content_clean,
+                    host=self.ollama_host,
+                    model=self.embedding_model,
+                )
+            except Exception as exc:
+                logger.debug("Không thể tự động sinh vector embedding: %s", exc)
+                vec = None
+
+        if vec:
+            try:
+                blob = float_list_to_blob(vec)
+                with self._get_connection() as conn:
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (mem_id, blob, now),
+                    )
+            except Exception as exc:
+                logger.debug("Lỗi lưu vector embedding vào SQLite: %s", exc)
+
         return mem_id
 
     def update_memory(
@@ -338,8 +403,9 @@ class MemoryStore:
         memory_id: str,
         content: str | None = None,
         category: str | None = None,
+        embedding: list[float] | None = None,
     ) -> bool:
-        """Cập nhật nội dung hoặc danh mục của một mục trí nhớ."""
+        """Cập nhật nội dung hoặc danh mục của một mục trí nhớ và cập nhật vector embedding."""
         now = get_current_iso_time()
         with self._get_connection() as conn:
             row = conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
@@ -364,12 +430,42 @@ class MemoryStore:
                 "INSERT INTO memories_fts (id, category, content) VALUES (?, ?, ?)",
                 (memory_id, new_cat, new_content),
             )
-            return True
+
+        # Cập nhật vector embedding nếu content thay đổi hoặc có embedding mới truyền vào
+        if content is not None or embedding is not None:
+            vec = embedding
+            if vec is None:
+                try:
+                    vec = get_embedding_sync(
+                        new_content,
+                        host=self.ollama_host,
+                        model=self.embedding_model,
+                    )
+                except Exception as exc:
+                    logger.debug("Không thể tự động cập nhật embedding: %s", exc)
+                    vec = None
+
+            if vec:
+                try:
+                    blob = float_list_to_blob(vec)
+                    with self._get_connection() as conn:
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, created_at)
+                            VALUES (?, ?, ?)
+                            """,
+                            (memory_id, blob, now),
+                        )
+                except Exception as exc:
+                    logger.debug("Lỗi cập nhật embedding: %s", exc)
+
+        return True
 
     def delete_memory(self, memory_id: str) -> bool:
-        """Xoá một mục trí nhớ theo ID."""
+        """Xoá một mục trí nhớ theo ID (đồng bộ FTS5 và embeddings)."""
         with self._get_connection() as conn:
             conn.execute("DELETE FROM memories_fts WHERE id = ?", (memory_id,))
+            conn.execute("DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,))
             cur = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
             return cur.rowcount > 0
 
@@ -445,3 +541,94 @@ class MemoryStore:
                     (f"%{q_clean}%", f"%{q_clean}%", limit),
                 )
                 return [dict(r) for r in cursor.fetchall()]
+
+    def search_memories_hybrid(
+        self,
+        query: str,
+        top_k: int = 10,
+        host: str | None = None,
+        embedding_model: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Tìm kiếm trí nhớ kết hợp Hybrid Search (FTS5 BM25 + Vector Similarity qua RRF).
+
+        1. Lấy kết quả từ FTS5 (từ khóa chính xác).
+        2. Lấy kết quả từ Cosine Similarity (tương đồng ngữ nghĩa).
+        3. Kết hợp bằng thuật toán Reciprocal Rank Fusion (RRF: score = 1 / (60 + rank)).
+        4. Tự động fallback mượt mà về tìm kiếm FTS5/LIKE nếu Ollama chưa bật hoặc chưa có vector.
+        """
+        q_clean = query.strip()
+        if not q_clean:
+            return []
+
+        # 1. Lấy kết quả từ FTS5 (từ khóa chính xác)
+        fts_results = self.search_memories(q_clean, limit=top_k * 2)
+        fts_ids = [r["id"] for r in fts_results]
+
+        # 2. Sinh vector embedding cho truy vấn
+        target_host = host or self.ollama_host
+        target_model = embedding_model or self.embedding_model
+
+        query_vec: list[float] | None = None
+        try:
+            query_vec = get_embedding_sync(q_clean, host=target_host, model=target_model)
+        except Exception as exc:
+            logger.debug("Không thể lấy embedding cho truy vấn '%s': %s", q_clean, exc)
+            query_vec = None
+
+        # Nếu không lấy được vector embedding (Ollama chưa bật hoặc lỗi model), fallback mượt mà
+        if query_vec is None:
+            return fts_results[:top_k]
+
+        # 3. Lấy tất cả vector từ bảng memory_embeddings để tính Cosine Similarity
+        vector_rankings: list[tuple[str, float]] = []
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT memory_id, embedding FROM memory_embeddings").fetchall()
+            for r in rows:
+                mem_id = r["memory_id"]
+                blob = r["embedding"]
+                vec = blob_to_float_list(blob)
+                if vec:
+                    sim = cosine_similarity(query_vec, vec)
+                    if sim > 0.0:
+                        vector_rankings.append((mem_id, sim))
+
+        # Nếu không có vector embedding nào trong database, fallback về FTS5
+        if not vector_rankings:
+            return fts_results[:top_k]
+
+        # Sắp xếp vector theo độ tương đồng giảm dần
+        vector_rankings.sort(key=lambda x: x[1], reverse=True)
+        vector_ids = [mem_id for mem_id, _ in vector_rankings[: top_k * 2]]
+
+        # 4. Kết hợp xếp hạng bằng Reciprocal Rank Fusion (RRF)
+        ranking_lists: list[list[str]] = []
+        if fts_ids:
+            ranking_lists.append(fts_ids)
+        if vector_ids:
+            ranking_lists.append(vector_ids)
+
+        fused_items = reciprocal_rank_fusion(ranking_lists, k=60)
+        top_ids = [item_id for item_id, _ in fused_items[:top_k]]
+
+        if not top_ids:
+            return fts_results[:top_k]
+
+        # 5. Lấy dữ liệu chi tiết của các memory theo thứ tự RRF đã xếp hạng
+        placeholders = ",".join("?" for _ in top_ids)
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                f"""
+                SELECT id, category, content, source_conv_id, created_at, updated_at
+                FROM memories
+                WHERE id IN ({placeholders})
+                """,
+                tuple(top_ids),
+            )
+            mem_dict = {row["id"]: dict(row) for row in cursor.fetchall()}
+
+        ordered_results: list[dict[str, Any]] = []
+        for mem_id in top_ids:
+            if mem_id in mem_dict:
+                ordered_results.append(mem_dict[mem_id])
+
+        return ordered_results

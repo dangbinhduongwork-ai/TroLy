@@ -258,7 +258,12 @@ class ChatWebSocketManager:
             await self._send_event(websocket, event_name, payload)
 
         # 7. Lấy danh sách trí nhớ liên quan và khởi tạo System Prompt
-        active_memories = context.get_relevant_memories(self.memory_store, max_tokens=600, max_memories=15)
+        active_memories = context.get_relevant_memories(
+            self.memory_store,
+            max_tokens=600,
+            max_memories=15,
+            query=user_text,
+        )
         system_prompt = get_system_prompt(
             timezone_str=self.config.timezone,
             memories=active_memories,

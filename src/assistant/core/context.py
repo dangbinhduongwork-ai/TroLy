@@ -88,13 +88,37 @@ class ConversationContext:
         store: "MemoryStore",
         max_tokens: int = 600,
         max_memories: int = 15,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Lấy danh sách các trí nhớ dài hạn, đảm bảo không vượt quá ngân sách token quy định."""
-        all_memories = store.list_memories(limit=max_memories)
+        """Lấy danh sách các trí nhớ dài hạn phù hợp nhất với ngữ cảnh, ưu tiên Hybrid Search.
+
+        Nếu có query (hoặc tự động trích xuất từ tin nhắn người dùng gần nhất), sử dụng Hybrid Search
+        (kết hợp FTS5 BM25 + Vector Similarity qua RRF). Nếu không có kết quả hoặc không có query,
+        fallback về danh sách trí nhớ gần nhất. Đảm bảo tổng dung lượng không vượt ngân sách token.
+        """
+        candidate_memories: list[dict[str, Any]] = []
+
+        target_query = query
+        if not target_query:
+            for m in reversed(self.messages):
+                if m.role == "user" and m.content and m.content.strip():
+                    target_query = m.content.strip()
+                    break
+
+        if target_query and hasattr(store, "search_memories_hybrid"):
+            try:
+                candidate_memories = store.search_memories_hybrid(target_query, top_k=max_memories)
+            except Exception:
+                candidate_memories = []
+
+        # Nếu không có query hoặc hybrid search không trả về kết quả, fallback về list_memories
+        if not candidate_memories:
+            candidate_memories = store.list_memories(limit=max_memories)
+
         selected: list[dict[str, Any]] = []
         current_tokens = 0
 
-        for mem in all_memories:
+        for mem in candidate_memories:
             content = mem.get("content", "")
             category = mem.get("category", "")
             mem_str = f"({category}): {content}"
