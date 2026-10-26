@@ -56,6 +56,17 @@ class ConversationContext:
         """Thêm một tin nhắn tổng quát vào ngữ cảnh."""
         self.messages.append(message)
 
+    def add_message_from_dict(
+        self,
+        role: str,
+        content: str | None,
+        model_used: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Thêm tin nhắn từ dữ liệu dạng dict/database vào ngữ cảnh."""
+        if role in ("user", "assistant", "system", "tool"):
+            self.messages.append(Message(role=role, content=content or ""))
+
     def clear(self) -> None:
         """Xoá sạch toàn bộ lịch sử và bản tóm tắt."""
         self.messages.clear()

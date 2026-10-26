@@ -721,7 +721,17 @@ def run_ui(
 
 def cli() -> None:
     """Hàm điểm đầu (entry point) khi chạy lệnh `assistant` trên terminal."""
+    if sys.platform == "win32":
+        try:
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            if hasattr(sys.stderr, "reconfigure"):
+                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(
+
         prog="assistant",
         description="Trợ lý AI trên Windows (AI Assistant)",
     )

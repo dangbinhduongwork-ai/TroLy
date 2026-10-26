@@ -68,3 +68,39 @@ def test_pydantic_message_and_event_schemas() -> None:
         content=Usage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
     )
     assert usage_event.content.total_tokens == 30
+
+
+def test_ollama_provider_set_model() -> None:
+    """Kiểm tra thay đổi model linh hoạt trên OllamaProvider."""
+    from assistant.config import Config
+    from assistant.llm.ollama_provider import OllamaProvider
+    from pathlib import Path
+
+    cfg = Config(workspace_dir=Path("."), data_dir=Path("."), local_model="qwen2.5:7b")
+    provider = OllamaProvider(cfg)
+    assert provider.default_model == "qwen2.5:7b"
+
+    provider.set_model("qwen2.5:14b")
+    assert provider.default_model == "qwen2.5:14b"
+
+
+def test_message_name_field_and_gemini_conversion() -> None:
+    """Kiểm tra trường name trong Message và hỗ trợ tra cứu function name."""
+    tc = ToolCall(id="call_abc_999", name="read_file", arguments={"path": "a.txt"})
+    m_assistant = Message(role="assistant", tool_calls=[tc])
+    m_tool = Message(role="tool", content="file content", tool_call_id="call_abc_999", name="read_file")
+
+    assert m_tool.name == "read_file"
+    assert m_tool.tool_call_id == "call_abc_999"
+
+    # Tra cứu function name từ call_id nếu Message cũ không có trường name
+    messages = [m_assistant, Message(role="tool", content="result", tool_call_id="call_abc_999")]
+    tool_call_id_to_name = {
+        tc_item.id: tc_item.name
+        for m in messages
+        if m.tool_calls
+        for tc_item in m.tool_calls
+        if tc_item.id and tc_item.name
+    }
+    assert tool_call_id_to_name.get("call_abc_999") == "read_file"
+

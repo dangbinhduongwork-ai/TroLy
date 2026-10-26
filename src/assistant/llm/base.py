@@ -39,6 +39,9 @@ class Message(BaseModel):
     tool_call_id: str | None = Field(
         default=None, description="ID lệnh gọi công cụ nếu role là 'tool'"
     )
+    name: str | None = Field(
+        default=None, description="Tên công cụ/hàm nếu role là 'tool'"
+    )
 
 
 class Usage(BaseModel):

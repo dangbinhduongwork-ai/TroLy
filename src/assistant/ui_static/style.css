@@ -1,9 +1,14 @@
+@import url("css/tokens.css");
+@import url("css/base.css");
+@import url("css/layout.css");
+@import url("css/components.css");
+
 /* =============================================================================
    HỆ THỐNG BIẾN MÀU & CHỦ ĐỀ (THEME VARIABLES)
    ============================================================================= */
 
 :root {
-    --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-stack: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
     --font-mono: "Cascadia Code", Consolas, "Courier New", monospace;
     --radius-sm: 6px;
     --radius-md: 10px;
@@ -11,8 +16,9 @@
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.15);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.25);
-    --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 
 /* CHỦ ĐỀ TỐI (DARK THEME - MẶC ĐỊNH) */
 body.dark-theme {
@@ -41,10 +47,11 @@ body.light-theme {
     --bg-secondary: #ffffff;
     --bg-tertiary: #eaeff8;
     --bg-glass: rgba(255, 255, 255, 0.9);
-    --text-primary: #1e293b;
-    --text-secondary: #475569;
-    --text-muted: #94a3b8;
-    --border-color: #dbe2ef;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --border-color: #cbd5e1;
+
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
     --accent-glow: rgba(37, 99, 235, 0.15);

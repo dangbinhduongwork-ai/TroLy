@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trợ Lý AI - Windows</title>
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/components.css">
     <link rel="stylesheet" href="/static/style.css">
+
 </head>
 <body class="dark-theme">
     <div class="app-layout">
@@ -36,10 +41,15 @@
                     <span class="nav-icon">⏰</span>
                     <span class="nav-label">Nhắc việc</span>
                 </button>
+                <button class="nav-item" data-screen="audit">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-label">Nhật ký</span>
+                </button>
                 <button class="nav-item" data-screen="settings">
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-label">Cài đặt</span>
                 </button>
+
             </nav>
 
             <div class="sidebar-footer">
@@ -78,6 +88,7 @@
                                 <option value="gemini">Gemini Cloud</option>
                                 <option value="local">Ollama Cục bộ</option>
                             </select>
+                            <span class="active-local-badge" id="active-local-model-badge" title="Mô hình Ollama hiện tại">qwen2.5:14b</span>
                         </div>
 
                         <!-- Gạt chế độ nhạy cảm -->
@@ -272,6 +283,18 @@
 
                             <div class="setting-row">
                                 <div class="setting-info">
+                                    <label class="setting-name">Mô hình Ollama cục bộ:</label>
+                                    <span class="setting-hint">Chọn model chạy trên máy bạn (ví dụ: qwen2.5:14b)</span>
+                                </div>
+                                <div class="select-inline-wrapper">
+                                    <select id="settings-select-local-model" class="form-control select-mode-wide">
+                                        <option value="qwen2.5:14b">qwen2.5:14b</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-info">
                                     <label class="setting-name">Khởi động cùng Windows:</label>
                                     <span class="setting-hint">Chạy ngầm ở khay hệ thống, không tự bung cửa sổ (HKCU, không cần Admin)</span>
                                 </div>
@@ -314,8 +337,45 @@
                     </div>
                 </div>
             </section>
+
+            <!-- 5. MÀN HÌNH NHẬT KÝ KIỂM TOÁN (AUDIT LOGS) -->
+            <section class="screen-view" id="screen-audit">
+                <header class="screen-header">
+                    <div class="screen-title-area">
+                        <h2>📋 Nhật Ký Kiểm Toán An Toàn</h2>
+                        <p class="text-muted">Toàn bộ thao tác file, lệnh hệ thống, duyệt quyền và bảo vệ bí mật được ghi nhận minh bạch.</p>
+                    </div>
+                    <div class="screen-actions">
+                        <button class="btn btn-outline btn-sm" id="btn-refresh-audit">
+                            <span>🔄</span> Làm mới
+                        </button>
+                    </div>
+                </header>
+
+                <div class="audit-container">
+                    <div class="table-container">
+                        <table class="audit-table">
+                            <thead>
+                                <tr>
+                                    <th>Thời gian</th>
+                                    <th>Hành động / Công cụ</th>
+                                    <th>Mức quyền</th>
+                                    <th>Trạng thái</th>
+                                    <th>Chi tiết</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-table-body">
+                                <tr>
+                                    <td colspan="5" class="empty-state">Đang tải nhật ký kiểm toán...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
+
 
     <!-- HỘP THOẠI PHÊ DUYỆT TÁC VỤ (APPROVAL MODAL) -->
     <div class="modal-overlay hidden" id="approval-modal">
@@ -407,6 +467,7 @@
         </div>
     </div>
 
+    <script src="/static/vendor/purify.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

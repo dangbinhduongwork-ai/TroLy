@@ -255,3 +255,11 @@ def test_show_windows_toast_fallback() -> None:
         title="Thử nghiệm Toast",
     )
     assert result is True
+
+
+def test_reminder_scheduler_is_running_property(tmp_path: Path) -> None:
+    """Kiểm tra thuộc tính is_running trên ReminderScheduler."""
+    store = ReminderStore(db_path=tmp_path / "rem_prop_test.db")
+    sched = ReminderScheduler(store=store)
+    # Chưa start thì is_running là False
+    assert sched.is_running is False

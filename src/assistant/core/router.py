@@ -152,6 +152,31 @@ class ModelRouter:
             raise ValueError(f"Chế độ không hợp lệ: {mode}. Chỉ hỗ trợ: auto, gemini, local.")
         self.mode = mode
 
+    def is_network_available(self) -> bool:
+        """Kiểm tra nhanh kết nối Internet (dùng cache hoặc socket đồng bộ với timeout ngắn)."""
+        checker = self.network_checker
+        if hasattr(checker, "is_online_val"):
+            return bool(getattr(checker, "is_online_val"))
+
+        now = time.time()
+        if (now - checker._last_check_time) < checker.cache_duration_sec:
+            return checker._cached_is_online
+
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.4)
+            res = sock.connect_ex(("1.1.1.1", 53))
+            sock.close()
+            is_on = (res == 0)
+        except Exception:
+            is_on = False
+
+        checker._cached_is_online = is_on
+        checker._last_check_time = now
+        return is_on
+
+
     async def stream_chat(
         self,
         messages: list[Message],

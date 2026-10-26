@@ -7,8 +7,10 @@ Tuân thủ:
 
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import Any
+
 
 from assistant.safety.paths import resolve_in_workspace
 from assistant.safety.permissions import PermissionLevel
@@ -125,9 +127,9 @@ def open_app(app_name: str) -> dict[str, Any]:
     if not query:
         return {"ok": False, "data": None, "error": "Tên ứng dụng không được để trống.", "truncated": False}
 
-    # 1. Kiểm tra trong danh bạ ứng dụng chuẩn hệ thống
+    # 1. Kiểm tra khớp chính xác tuyệt đối trong danh bạ ứng dụng chuẩn
     for alias, exe_name in STANDARD_WINDOWS_APPS.items():
-        if query == alias or alias in query or query in alias:
+        if query == alias:
             try:
                 subprocess.Popen([exe_name], shell=False)
                 return {
@@ -138,6 +140,22 @@ def open_app(app_name: str) -> dict[str, Any]:
                 }
             except Exception as err:
                 return {"ok": False, "data": None, "error": f"Không thể mở {exe_name}: {err}", "truncated": False}
+
+    # 2. Kiểm tra khớp theo ranh giới từ hoàn chỉnh (tránh "developer" khớp nhầm "ve")
+    for alias, exe_name in STANDARD_WINDOWS_APPS.items():
+        pattern = r"(?:\b|^)" + re.escape(alias) + r"(?:\b|$)"
+        if re.search(pattern, query, re.IGNORECASE):
+            try:
+                subprocess.Popen([exe_name], shell=False)
+                return {
+                    "ok": True,
+                    "data": f"Đã mở ứng dụng hệ thống: {exe_name}",
+                    "error": None,
+                    "truncated": False,
+                }
+            except Exception as err:
+                return {"ok": False, "data": None, "error": f"Không thể mở {exe_name}: {err}", "truncated": False}
+
 
     # 2. Tìm kiếm trong các shortcut của Start Menu
     shortcuts = _get_start_menu_shortcuts()

@@ -172,6 +172,13 @@ class GeminiProvider(LLMProvider):
         from google.genai import types
 
         # 1. Chuyển đổi định dạng hội thoại nội bộ sang định dạng Gemini
+        tool_call_id_to_name: dict[str, str] = {}
+        for m in messages:
+            if m.tool_calls:
+                for tc in m.tool_calls:
+                    if tc.id and tc.name:
+                        tool_call_id_to_name[tc.id] = tc.name
+
         contents: list[types.Content] = []
         for msg in messages:
             if msg.role == "system":
@@ -180,9 +187,15 @@ class GeminiProvider(LLMProvider):
 
             parts: list[types.Part] = []
             if msg.role == "tool":
+                func_name = (
+                    getattr(msg, "name", None)
+                    or (tool_call_id_to_name.get(msg.tool_call_id) if msg.tool_call_id else None)
+                    or msg.tool_call_id
+                    or "tool"
+                )
                 parts.append(
                     types.Part.from_function_response(
-                        name=msg.tool_call_id or "tool",
+                        name=func_name,
                         response={"result": msg.content or ""},
                     )
                 )

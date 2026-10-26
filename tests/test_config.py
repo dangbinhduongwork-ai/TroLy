@@ -141,3 +141,27 @@ def test_appconfig_alias() -> None:
 
     assert AppConfig is Config
 
+
+def test_pyinstaller_frozen_config_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kiểm tra load_config khi chạy trong môi trường đóng gói PyInstaller (frozen)."""
+    import sys
+
+    fake_exe = tmp_path / "bin" / "assistant.exe"
+    fake_exe.parent.mkdir(parents=True, exist_ok=True)
+    fake_exe.touch()
+
+    cfg_dir = fake_exe.parent / "config"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    settings_file = cfg_dir / "settings.toml"
+    settings_file.write_text('[models]\nlocal_model = "qwen2.5:14b"\n', encoding="utf-8")
+
+    env_file = fake_exe.parent / ".env"
+    env_file.write_text("UI_PORT=9999\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+
+    config = load_config(create_dirs=False)
+    assert config.local_model == "qwen2.5:14b"
+    assert config.ui_port == 9999
+

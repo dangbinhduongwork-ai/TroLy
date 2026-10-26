@@ -20,6 +20,7 @@ Kiểm tra:
 from collections.abc import AsyncIterator
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -370,6 +371,7 @@ def test_websocket_approval_flow(tmp_path: Path) -> None:
             data = json.loads(raw)
             if data.get("type") == "turn_done":
                 received_done = True
+                assert "delete_path" in data["data"].get("tools_called", [])
                 break
 
         assert received_done is True
@@ -420,10 +422,10 @@ def test_settings_api_endpoints(test_app_client: tuple[TestClient, str]) -> None
     res = client.post(
         "/api/settings/model",
         headers=headers,
-        json={"mode": "only_local"},
+        json={"mode": "local"},
     )
     assert res.status_code == 200
-    assert res.json()["mode"] == "only_local"
+    assert res.json()["mode"] == "local"
 
     # 4. POST /api/settings/autostart
     with patch("assistant.server.app.enable_autostart", return_value=True), patch("assistant.server.app.is_autostart_enabled", return_value=True):
@@ -434,4 +436,121 @@ def test_settings_api_endpoints(test_app_client: tuple[TestClient, str]) -> None
         )
         assert res.status_code == 200
         assert res.json()["enabled"] is True
+
+
+def test_websocket_chat_injects_memories(tmp_path: Path) -> None:
+    """Xác minh WebSocket /ws/chat tự động nạp trí nhớ dài hạn vào prompt (Fix ERR-03)."""
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "test_memory_ws.db"
+    mem_store = MemoryStore(db_path=db_path)
+    rem_store = ReminderStore(db_path=db_path)
+
+    # Thêm một trí nhớ dài hạn
+    mem_store.add_memory(category="preference", content="Thích dùng dark mode và phản hồi ngắn gọn")
+
+    config = Config(workspace_dir=ws_dir, data_dir=tmp_path)
+    mock_provider = MockServerProvider(response_text="Tôi đã nhớ sở thích của bạn.")
+    router = ModelRouter(gemini_provider=mock_provider, ollama_provider=mock_provider)
+
+    test_token = "token_mem_inject_test"
+    app = create_app(
+        config=config,
+        router=router,
+        memory_store=mem_store,
+        reminder_store=rem_store,
+        session_token=test_token,
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect(f"/ws/chat?token={test_token}") as ws:
+        ws.send_text(json.dumps({"type": "user_message", "message": "Chào bạn"}))
+        for _ in range(10):
+            raw = ws.receive_text()
+            data = json.loads(raw)
+            if data.get("type") == "turn_done":
+                break
+
+    # Kiểm tra trí nhớ đã có trong store
+    mems = mem_store.list_memories()
+    assert len(mems) >= 1
+    assert "dark mode" in mems[0]["content"]
+
+
+def test_audit_api_endpoint(test_app_client: tuple[TestClient, str, Any, Any], tmp_path: Path) -> None:
+    """Kiểm tra API GET /api/audit đọc danh sách sự kiện từ audit.jsonl (Fix ERR-06)."""
+    client, token, _, _ = test_app_client
+    headers = {"X-Session-Token": token}
+
+    # Đọc khi chưa có file audit.jsonl -> trả về mảng rỗng []
+    res_empty = client.get("/api/audit", headers=headers)
+    assert res_empty.status_code == 200
+    assert isinstance(res_empty.json(), list)
+
+    # Ghi thử một dòng audit vào tmp_path/audit.jsonl
+    audit_file = tmp_path / "audit.jsonl"
+    sample_log = {
+        "timestamp": "2026-10-27T00:00:00Z",
+        "action": "tool_executed",
+        "tool": "read_file",
+        "status": "success",
+    }
+    with open(audit_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps(sample_log) + "\n")
+
+    res_with_logs = client.get("/api/audit", headers=headers)
+    assert res_with_logs.status_code == 200
+    logs = res_with_logs.json()
+    assert len(logs) == 1
+    assert logs[0]["tool"] == "read_file"
+
+
+def test_update_local_model_endpoint(test_app_client: tuple[TestClient, str, Any, Any]) -> None:
+    """Kiểm tra API POST /api/settings/local-model cập nhật model Ollama được chọn."""
+    client, token, _, _ = test_app_client
+    headers = {"X-Session-Token": token}
+
+    res = client.post(
+        "/api/settings/local-model",
+        headers=headers,
+        json={"local_model": "qwen2.5:14b"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["local_model"] == "qwen2.5:14b"
+
+
+def test_status_endpoint_returns_real_usage_and_last_model(tmp_path: Path) -> None:
+    """Kiểm tra GET /api/status phản ánh last_model_used và số lượng request thực tế từ usage_tracker."""
+    db_path = tmp_path / "test_status.db"
+    mem_store = MemoryStore(db_path=db_path)
+    rem_store = ReminderStore(db_path=db_path)
+    config = Config(workspace_dir=tmp_path / "ws", data_dir=tmp_path)
+
+    mock_provider = MockServerProvider()
+    router = ModelRouter(config=config, gemini_provider=mock_provider, ollama_provider=mock_provider)
+    router.last_model_used = "qwen2.5:14b"
+    # Giả lập ghi nhận 5 lượt gọi
+    for _ in range(5):
+        router.usage_tracker.record_request()
+
+    token = "test_status_token"
+    app = create_app(
+        config=config,
+        router=router,
+        memory_store=mem_store,
+        reminder_store=rem_store,
+        session_token=token,
+    )
+    client = TestClient(app)
+
+    res = client.get("/api/status", headers={"X-Session-Token": token})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["current_model"] == "qwen2.5:14b"
+    assert data["daily_requests_count"] == 5
+    assert "scheduler_running" in data
+
+
 

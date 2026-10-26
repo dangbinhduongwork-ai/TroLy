@@ -55,49 +55,98 @@ function parseMarkdown(mdText) {
         return id;
     });
 
-    // 3. Escape HTML cho các phần còn lại để chống XSS
+    // 3. Xử lý bảng Markdown (| Header 1 | Header 2 |\n|---|---|\n| Cell 1 | Cell 2 |) trước khi escape
+    const tables = [];
+    processed = processed.replace(/((?:\|[^\n]+\|\r?\n)((?:\|(?:\s*[:-]+[-| :]*)\|\r?\n))((?:\|[^\n]+\|\r?\n?)+))/g, (match, headerLine, sepLine, rowsBlock) => {
+        const id = `__TABLE_BLOCK_${tables.length}__`;
+        const parseRow = (line, tag) => {
+            const cells = line.split('|').slice(1, -1);
+            return '<tr>' + cells.map(c => `<${tag}>${escapeHtml(c.trim())}</${tag}>`).join('') + '</tr>';
+        };
+        const thead = '<thead>' + parseRow(headerLine.trim(), 'th') + '</thead>';
+        const rows = rowsBlock.trim().split(/\r?\n/).map(r => parseRow(r.trim(), 'td')).join('');
+        const tbody = '<tbody>' + rows + '</tbody>';
+        tables.push(`<div class="table-container"><table class="markdown-table">${thead}${tbody}</table></div>`);
+        return id;
+    });
+
+    // 4. Escape HTML cho các phần còn lại để chống XSS
     processed = escapeHtml(processed);
 
-    // 4. Định dạng tiêu đề (Headings)
+    // 5. Liên kết Markdown [Tiêu đề](https://...)
+    processed = processed.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+    // 6. Định dạng tiêu đề (Headings)
     processed = processed.replace(/^### (.*$)/gim, "<h3>$1</h3>");
     processed = processed.replace(/^## (.*$)/gim, "<h2>$1</h2>");
     processed = processed.replace(/^# (.*$)/gim, "<h1>$1</h1>");
 
-    // 5. In đậm & in nghiêng
+    // 7. In đậm & in nghiêng
     processed = processed.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
     processed = processed.replace(/\*(.*?)\*/g, "<em>$1</em>");
 
-    // 6. Blockquote
+    // 8. Blockquote
     processed = processed.replace(/^\> (.*$)/gim, "<blockquote>$1</blockquote>");
 
-    // 7. Danh sách không thứ tự (* hoặc -)
+    // 9. Danh sách không thứ tự (* hoặc -)
     processed = processed.replace(/^\s*[-*]\s+(.*$)/gim, "<li>$1</li>");
     processed = processed.replace(/(<li>.*<\/li>)/gim, "<ul>$1</ul>");
 
-    // 8. Đổi dòng đơn sang <br> (nếu không phải trong thẻ block)
+    // 10. Đổi dòng đơn sang <br> (nếu không phải trong thẻ block)
     processed = processed.replace(/\n/g, "<br>");
 
-    // 9. Khôi phục lại inline code
+    // 11. Khôi phục lại bảng dữ liệu
+    tables.forEach((tbl, idx) => {
+        processed = processed.replace(`__TABLE_BLOCK_${idx}__`, tbl);
+    });
+
+    // 12. Khôi phục lại inline code
     inlineCodes.forEach((code, idx) => {
         processed = processed.replace(`__INLINE_CODE_${idx}__`, `<code>${code}</code>`);
     });
 
-    // 10. Khôi phục lại khối code blocks
+    // 13. Khôi phục lại khối code blocks
     codeBlocks.forEach((block, idx) => {
         const blockHtml = `
             <div class="code-container">
+                <div class="code-header">
+                    <span class="code-lang">${escapeHtml(block.lang)}</span>
+                    <button class="btn-copy-code" onclick="copyCodeSnippet(this)">Sao chép</button>
+                </div>
                 <pre><code class="lang-${block.lang}">${block.code}</code></pre>
             </div>
         `;
         processed = processed.replace(`__CODE_BLOCK_${idx}__`, blockHtml);
     });
 
+    // 14. Bảo mật: Làm sạch toàn bộ HTML bằng DOMPurify nếu có
+    if (typeof window !== "undefined" && window.DOMPurify && typeof window.DOMPurify.sanitize === "function") {
+        processed = window.DOMPurify.sanitize(processed);
+    }
+
     return processed;
+}
+
+
+function copyCodeSnippet(button) {
+    const container = button.closest(".code-container");
+    if (!container) return;
+    const codeElem = container.querySelector("pre code");
+    if (codeElem) {
+        navigator.clipboard.writeText(codeElem.innerText).then(() => {
+            const oldText = button.innerText;
+            button.innerText = "Đã chép!";
+            setTimeout(() => { button.innerText = oldText; }, 1500);
+        }).catch(() => {
+            button.innerText = "Lỗi!";
+        });
+    }
 }
 
 // =============================================================================
 // YÊU CẦU REST API CÓ BẢO VỆ TOKEN
 // =============================================================================
+
 
 async function apiFetch(endpoint, options = {}) {
     const headers = options.headers || {};
@@ -139,6 +188,10 @@ function connectWebSocket() {
 
     state.ws.onclose = (event) => {
         statusDot.className = "status-dot offline";
+        if (event.code === 1008 || (event.reason && event.reason.includes("token"))) {
+            statusText.innerText = "Phiên làm việc đã hết hạn. Vui lòng F5 tải lại trang.";
+            return;
+        }
         statusText.innerText = "Mất kết nối (Đang thử lại...)";
         // Tự động kết nối lại sau 2 giây
         setTimeout(connectWebSocket, 2000);
@@ -296,6 +349,9 @@ function finishCurrentTurn(data) {
 
     if (state.currentTextSpan) {
         state.currentTextSpan.classList.remove("typing-cursor");
+        if (!state.currentRawText) {
+            state.currentTextSpan.innerHTML = `<span class="text-muted">${data.cancelled ? "⏹ Đã dừng câu trả lời theo yêu cầu." : "⚠️ Chưa nhận được phản hồi từ mô hình."}</span>`;
+        }
     }
 
     if (data.model_used && state.currentAssistantRow) {
@@ -335,9 +391,7 @@ function appendErrorMessage(errText) {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// =============================================================================
-// HỘP THOẠI DUYỆT QUYỀN (APPROVAL MODAL)
-// =============================================================================
+let _approvalKeydownHandler = null;
 
 function showApprovalModal(data) {
     state.activeApprovalRequestId = data.request_id;
@@ -361,11 +415,70 @@ function showApprovalModal(data) {
     }, 1000);
 
     modal.classList.remove("hidden");
+
+    // 1. Tự động focus nút Từ chối (Safety first)
+    const btnDeny = document.getElementById("btn-deny-approval");
+    const btnApprove = document.getElementById("btn-approve-approval");
+    if (btnDeny) {
+        btnDeny.focus();
+    }
+
+    // 2. Khóa tiêu điểm (Focus Trap) & Phím tắt an toàn: Esc = Từ chối, Chặn Enter tự động duyệt
+    if (_approvalKeydownHandler) {
+        window.removeEventListener("keydown", _approvalKeydownHandler);
+    }
+
+    _approvalKeydownHandler = function (e) {
+        if (modal.classList.contains("hidden")) return;
+
+        // Esc -> Tương đương Từ chối
+        if (e.key === "Escape") {
+            e.preventDefault();
+            respondApproval(false);
+            return;
+        }
+
+        // Chặn phím Enter tự động Cho phép nếu không chủ động focus vào nút Cho phép
+        if (e.key === "Enter" && document.activeElement !== btnApprove) {
+            e.preventDefault();
+            return;
+        }
+
+        // Bẫy tiêu điểm (Focus Trap giữa Deny và Approve)
+        if (e.key === "Tab") {
+            const focusables = [btnDeny, btnApprove].filter(Boolean);
+            if (focusables.length === 0) return;
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+
+            if (e.shiftKey) {
+                if (document.activeElement === first) {
+                    last.focus();
+                    e.preventDefault();
+                }
+            } else {
+                if (document.activeElement === last) {
+                    first.focus();
+                    e.preventDefault();
+                }
+            }
+        }
+    };
+
+    window.addEventListener("keydown", _approvalKeydownHandler);
 }
 
 function respondApproval(approved) {
+    if (_approvalKeydownHandler) {
+        window.removeEventListener("keydown", _approvalKeydownHandler);
+        _approvalKeydownHandler = null;
+    }
     clearInterval(state.approvalTimerInterval);
     document.getElementById("approval-modal").classList.add("hidden");
+
+    // Khôi phục tiêu điểm về khung nhập tin nhắn
+    const input = document.getElementById("user-input");
+    if (input) input.focus();
 
     if (state.activeApprovalRequestId && state.ws) {
         const payload = {
@@ -377,6 +490,7 @@ function respondApproval(approved) {
         state.activeApprovalRequestId = null;
     }
 }
+
 
 // =============================================================================
 // QUẢN LÝ DANH SÁCH CUỘC HỘI THOẠI
@@ -673,7 +787,63 @@ async function loadDiagnostics() {
         document.getElementById("diag-current-mode").innerText = modeLabels[res.mode] || res.mode;
 
         const modeSelect = document.getElementById("settings-select-mode");
-        if (modeSelect) modeSelect.value = res.mode;
+        if (modeSelect) {
+            modeSelect.value = res.mode;
+            modeSelect.onchange = async (e) => {
+                await apiFetch("/api/settings/model", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode: e.target.value }),
+                });
+                const chatSelect = document.getElementById("select-model-mode");
+                if (chatSelect) chatSelect.value = e.target.value;
+                await loadDiagnostics();
+            };
+        }
+
+        const chatModeSelect = document.getElementById("select-model-mode");
+        if (chatModeSelect && !chatModeSelect._hasBoundChange) {
+            chatModeSelect._hasBoundChange = true;
+            chatModeSelect.onchange = async (e) => {
+                await apiFetch("/api/settings/model", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode: e.target.value }),
+                });
+            };
+        }
+
+        // Cập nhật tên local model trên badge và dropdown
+        const activeLocal = res.local_model || "qwen2.5:14b";
+        const headerBadge = document.getElementById("active-local-model-badge");
+        if (headerBadge) {
+            headerBadge.innerText = activeLocal;
+        }
+
+        const localModelSelect = document.getElementById("settings-select-local-model");
+        if (localModelSelect) {
+            localModelSelect.innerHTML = "";
+            if (res.ollama_models && res.ollama_models.length > 0) {
+                res.ollama_models.forEach((m) => {
+                    const opt = document.createElement("option");
+                    opt.value = m;
+                    opt.innerText = m;
+                    if (m === activeLocal || m.startsWith(activeLocal)) {
+                        opt.selected = true;
+                    }
+                    localModelSelect.appendChild(opt);
+                });
+            } else {
+                const opt = document.createElement("option");
+                opt.value = activeLocal;
+                opt.innerText = `${activeLocal} (chưa tải về)`;
+                opt.selected = true;
+                localModelSelect.appendChild(opt);
+            }
+            localModelSelect.onchange = async (e) => {
+                await changeLocalModel(e.target.value);
+            };
+        }
 
         // 5. Autostart checkbox
         const autoCheck = document.getElementById("chk-autostart");
@@ -690,16 +860,39 @@ async function loadDiagnostics() {
             if (res.ollama_models && res.ollama_models.length > 0) {
                 res.ollama_models.forEach((m) => {
                     const tag = document.createElement("span");
-                    tag.className = "model-tag";
-                    tag.innerText = m;
+                    const isActive = (m === activeLocal || m.startsWith(activeLocal));
+                    tag.className = "model-tag" + (isActive ? " active" : "");
+                    tag.title = "Bấm để kích hoạt model này";
+                    tag.innerText = m + (isActive ? " ✓" : "");
+                    tag.onclick = async () => {
+                        await changeLocalModel(m);
+                    };
                     modelsList.appendChild(tag);
                 });
             } else {
-                modelsList.innerHTML = `<span class="tag-empty">${res.ollama_running ? "(Chưa có model nào. Hãy chạy: ollama pull qwen2.5:7b)" : "(Ollama chưa bật)"}</span>`;
+                modelsList.innerHTML = `<span class="tag-empty">${res.ollama_running ? "(Chưa có model nào. Hãy chạy: ollama pull qwen2.5:14b)" : "(Ollama chưa bật)"}</span>`;
             }
         }
     } catch (err) {
         console.error("Lỗi tải chẩn đoán:", err);
+    }
+}
+
+async function changeLocalModel(newModel) {
+    if (!newModel) return;
+    try {
+        const res = await apiFetch("/api/settings/local-model", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ local_model: newModel }),
+        });
+        if (res && res.ok) {
+            const headerBadge = document.getElementById("active-local-model-badge");
+            if (headerBadge) headerBadge.innerText = newModel;
+            await loadDiagnostics();
+        }
+    } catch (err) {
+        console.error("Lỗi cập nhật model Ollama:", err);
     }
 }
 
@@ -737,10 +930,89 @@ async function saveGeminiKey() {
 
 
 // =============================================================================
+// I18N ĐA NGÔN NGỮ
+// =============================================================================
+let _i18nData = null;
+
+async function initI18n() {
+    try {
+        const resp = await fetch("/static/i18n/vi.json");
+        if (resp.ok) {
+            _i18nData = await resp.json();
+        }
+    } catch (err) {
+        console.warn("Chưa nạp được vi.json, sử dụng nhãn mặc định:", err);
+    }
+}
+
+function t(keyPath, fallback = "") {
+    if (!_i18nData) return fallback || keyPath;
+    const parts = keyPath.split(".");
+    let curr = _i18nData;
+    for (const part of parts) {
+        if (curr && typeof curr === "object" && part in curr) {
+            curr = curr[part];
+        } else {
+            return fallback || keyPath;
+        }
+    }
+    return typeof curr === "string" ? curr : (fallback || keyPath);
+}
+
+// =============================================================================
+// QUẢN LÝ NHẬT KÝ KIỂM TOÁN (AUDIT LOGS)
+// =============================================================================
+
+async function loadAuditLogs() {
+    const tbody = document.getElementById("audit-table-body");
+    if (!tbody) return;
+
+    try {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Đang nạp nhật ký kiểm toán...</td></tr>`;
+        const logs = await apiFetch("/api/audit?limit=150");
+        tbody.innerHTML = "";
+        if (!logs || logs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Chưa có sự kiện kiểm toán nào được ghi nhận.</td></tr>`;
+            return;
+        }
+
+        logs.forEach((item) => {
+            const tr = document.createElement("tr");
+            const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString("vi-VN") : "-";
+            const levelClass = (item.permission_level || "info").toLowerCase();
+            const levelBadge = `<span class="badge badge-${levelClass}">${escapeHtml(item.permission_level || "INFO")}</span>`;
+
+            let statusBadge = `<span class="badge badge-success">Thành công</span>`;
+            if (item.status === "DENIED" || item.status === "FAILED") {
+                statusBadge = `<span class="badge badge-danger">Từ chối/Lỗi</span>`;
+            } else if (item.status === "APPROVED") {
+                statusBadge = `<span class="badge badge-warning">Đã duyệt</span>`;
+            }
+
+            const action = escapeHtml(item.action || item.tool_name || "event");
+            const details = escapeHtml(JSON.stringify(item.details || item.arguments || {}, null, 1));
+
+            tr.innerHTML = `
+                <td class="col-time">${timeStr}</td>
+                <td class="col-action"><strong>${action}</strong></td>
+                <td class="col-level">${levelBadge}</td>
+                <td class="col-status">${statusBadge}</td>
+                <td class="col-details"><pre class="audit-details-box">${details}</pre></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="error-state">Lỗi khi tải nhật ký: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+// =============================================================================
 // KHỞI TẠO VÀ LẮNG NGHE SỰ KIỆN (INITIALIZATION)
 // =============================================================================
 
 document.addEventListener("DOMContentLoaded", async () => {
+    await initI18n();
+
     // 1. Chuyển đổi màn hình (Sidebar navigation)
     document.querySelectorAll(".nav-item").forEach((btn) => {
         btn.onclick = () => {
@@ -749,14 +1021,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             btn.classList.add("active");
             const screenId = `screen-${btn.dataset.screen}`;
-            document.getElementById(screenId).classList.add("active");
+            const targetScreen = document.getElementById(screenId);
+            if (targetScreen) targetScreen.classList.add("active");
             state.currentScreen = btn.dataset.screen;
 
             if (state.currentScreen === "memories") loadMemories();
             if (state.currentScreen === "reminders") loadReminders();
+            if (state.currentScreen === "audit") loadAuditLogs();
             if (state.currentScreen === "settings") loadDiagnostics();
         };
     });
+
 
     // 2. Chuyển đổi Dark/Light mode
     const themeBtn = document.getElementById("theme-toggle");
@@ -796,9 +1071,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("btn-send").onclick = sendUserMessage;
 
     document.getElementById("btn-cancel").onclick = () => {
-        if (state.ws) {
-            state.ws.send(JSON.stringify({ type: "cancel" }));
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            try {
+                state.ws.send(JSON.stringify({ type: "cancel" }));
+            } catch (e) {
+                console.error("Lỗi gửi lệnh huỷ:", e);
+            }
         }
+        finishCurrentTurn({ cancelled: true });
     };
 
     // 4. Sự kiện modal phê duyệt
@@ -862,7 +1142,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         sendUserMessage();
     };
 
-    // 8. Sự kiện màn hình Cài đặt & Chẩn đoán
+    // 8. Sự kiện màn hình Nhật ký kiểm toán
+    const btnRefreshAudit = document.getElementById("btn-refresh-audit");
+    if (btnRefreshAudit) btnRefreshAudit.onclick = loadAuditLogs;
+
+    // 9. Sự kiện màn hình Cài đặt & Chẩn đoán
+
     const btnSaveKey = document.getElementById("btn-save-key");
     if (btnSaveKey) btnSaveKey.onclick = saveGeminiKey;
 

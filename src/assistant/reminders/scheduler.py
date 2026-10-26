@@ -77,6 +77,13 @@ class ReminderScheduler:
                 timezone=zoneinfo.ZoneInfo(self.timezone_str)
             )
 
+    @property
+    def is_running(self) -> bool:
+        """Kiểm tra APScheduler có đang hoạt động hay không."""
+        if self.scheduler is not None and hasattr(self.scheduler, "running"):
+            return bool(self.scheduler.running)
+        return bool(self._is_running)
+
     def check_missed_reminders_on_startup(self) -> list[dict[str, Any]]:
         """Quét và gom các lời nhắc bị quá hạn trong lúc tắt chương trình."""
         now_iso = get_current_iso_time(self.timezone_str)

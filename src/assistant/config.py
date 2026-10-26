@@ -7,6 +7,7 @@ Tự động tạo các thư mục cần thiết (workspace_dir, data_dir, data_
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import sys
 import tomllib
 from typing import Any
 
@@ -74,15 +75,32 @@ def load_config(
     Returns:
         Đối tượng Config chứa toàn bộ tham số đã kiểm tra.
     """
-    # Tìm thư mục gốc của dự án (3 cấp thư mục: src/assistant -> src -> project root)
-    root_dir = Path(__file__).resolve().parent.parent.parent
-
-    # Tải biến môi trường từ .env nếu có ở root
-    _load_env_file_if_present(root_dir / ".env")
+    # Tìm thư mục gốc của dự án hoặc môi trường đóng gói PyInstaller
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        meipass_dir = Path(getattr(sys, "_MEIPASS", exe_dir))
+        if (exe_dir / "config" / "settings.toml").is_file():
+            root_dir = exe_dir
+        elif (meipass_dir / "config" / "settings.toml").is_file():
+            root_dir = meipass_dir
+        else:
+            root_dir = exe_dir
+        # Tải biến môi trường từ .env nếu có cạnh exe hoặc trong bundle
+        _load_env_file_if_present(exe_dir / ".env")
+        if meipass_dir != exe_dir:
+            _load_env_file_if_present(meipass_dir / ".env")
+    else:
+        root_dir = Path(__file__).resolve().parent.parent.parent
+        _load_env_file_if_present(root_dir / ".env")
 
     # Đường dẫn file toml mặc định
     if settings_file is None:
         settings_file = root_dir / "config" / "settings.toml"
+        if getattr(sys, "frozen", False) and not settings_file.is_file():
+            if (exe_dir / "config" / "settings.toml").is_file():
+                settings_file = exe_dir / "config" / "settings.toml"
+            elif (meipass_dir / "config" / "settings.toml").is_file():
+                settings_file = meipass_dir / "config" / "settings.toml"
 
     toml_data: dict[str, Any] = {}
     if settings_file.is_file():
@@ -115,7 +133,7 @@ def load_config(
     gemini_model = (
         os.getenv("GEMINI_MODEL") or models_sec.get("gemini_model") or "gemini-2.5-flash"
     )
-    local_model = os.getenv("LOCAL_MODEL") or models_sec.get("local_model") or "qwen2.5:7b"
+    local_model = os.getenv("LOCAL_MODEL") or models_sec.get("local_model") or "qwen2.5:14b"
     ollama_host = (
         os.getenv("OLLAMA_HOST") or models_sec.get("ollama_host") or "http://127.0.0.1:11434"
     )

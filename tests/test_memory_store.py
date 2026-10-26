@@ -159,3 +159,22 @@ def test_memories_fts5_vietnamese(tmp_path: Path) -> None:
     # 2. Tìm kiếm với ký tự đặc biệt hoặc dấu ngoặc (không làm sập hệ thống, fallback LIKE)
     results_special = store.search_memories("YYYY-MM-DD*")
     assert len(results_special) >= 1
+
+
+def test_search_messages_special_characters_fallback(tmp_path: Path) -> None:
+    """Kiểm tra search_messages với ký tự đặc biệt không bị văng lỗi FTS5 (Fix ERR-04)."""
+    db_file = tmp_path / "test_msg_fts.db"
+    store = MemoryStore(db_path=db_file)
+
+    conv_id = store.create_conversation("Kiểm thử FTS")
+    store.add_message(conv_id, role="user", content="Báo cáo tài chính quý 1: doanh thu tăng 15%")
+    store.add_message(conv_id, role="assistant", content="Ghi nhận báo cáo tài chính quý 1.")
+
+    # Tìm kiếm bình thường
+    res1 = store.search_messages("tài chính")
+    assert len(res1) >= 1
+
+    # Tìm kiếm với ký tự đặc biệt FTS5 (không làm crash, tự động fallback sang LIKE)
+    res2 = store.search_messages('quý 1: "*--')
+    assert isinstance(res2, list)
+

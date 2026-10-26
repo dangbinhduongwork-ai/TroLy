@@ -9,9 +9,13 @@ Nguyên tắc an toàn & bảo mật:
 """
 
 from contextlib import asynccontextmanager
+import json
 from pathlib import Path
+import re
 import secrets
+import sys
 from typing import Any
+
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -117,7 +121,9 @@ def create_app(
         router=app_router,
         memory_store=app_mem_store,
         token_verifier=verify_session_token,
+        config=app_config,
     )
+
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -189,9 +195,11 @@ def create_app(
         except Exception:
             pass
 
-        current_model_name = getattr(app_router, "last_used_model", None) or (
+        current_model_name = getattr(app_router, "last_model_used", None) or (
             app_config.gemini_model if app_router.mode == "gemini" else app_config.local_model
         )
+
+        daily_count = app_router.usage_tracker.get_count() if hasattr(app_router, "usage_tracker") else 0
 
         return {
             "gemini_configured": gemini_configured,
@@ -200,10 +208,10 @@ def create_app(
             "current_model": current_model_name,
             "gemini_model": app_config.gemini_model,
             "local_model": app_config.local_model,
-            "daily_requests_count": 0,
+            "daily_requests_count": daily_count,
             "daily_soft_limit": app_config.daily_soft_limit,
             "workspace_dir": str(app_config.workspace_dir),
-            "scheduler_running": app_scheduler.is_running,
+            "scheduler_running": bool(getattr(app_scheduler, "is_running", False)),
         }
 
     # =========================================================================
@@ -413,6 +421,42 @@ def create_app(
         app_router.set_mode(req.mode)
         return {"ok": True, "mode": app_router.mode}
 
+    @app.post("/api/settings/local-model", dependencies=[Depends(require_session_token)])
+    async def update_local_model(req: dict[str, Any]) -> dict[str, Any]:
+        """Cập nhật mô hình Ollama cục bộ đang hoạt động."""
+        new_model = str(req.get("local_model", "")).strip()
+        if not new_model:
+            raise HTTPException(status_code=400, detail="Tên model không được để trống")
+
+        app_config.local_model = new_model
+        if hasattr(app_router.ollama_provider, "set_model"):
+            app_router.ollama_provider.set_model(new_model)
+
+        # Cập nhật vào config/settings.toml nếu có để ghi nhớ
+        try:
+            candidate_paths = [
+                Path("config/settings.toml"),
+                Path(__file__).resolve().parent.parent.parent / "config" / "settings.toml",
+            ]
+            if getattr(sys, "frozen", False):
+                exe_dir = Path(sys.executable).parent
+                candidate_paths.insert(0, exe_dir / "config" / "settings.toml")
+
+            for settings_path in candidate_paths:
+                if settings_path.is_file():
+                    content = settings_path.read_text(encoding="utf-8")
+                    updated = re.sub(
+                        r'local_model\s*=\s*["\'][^"\']*["\']',
+                        f'local_model = "{new_model}"',
+                        content,
+                    )
+                    settings_path.write_text(updated, encoding="utf-8")
+                    break
+        except Exception:
+            pass
+
+        return {"ok": True, "local_model": app_config.local_model}
+
     @app.post("/api/settings/autostart", dependencies=[Depends(require_session_token)])
     async def update_autostart(req: AutostartUpdateRequest) -> dict[str, Any]:
         """Bật hoặc tắt tính năng tự khởi động cùng Windows."""
@@ -423,10 +467,37 @@ def create_app(
             success = disable_autostart()
         return {"ok": success, "autostart_enabled": is_autostart_enabled()}
 
+    # =========================================================================
+    # REST API: NHẬT KÝ KIỂM TOÁN (AUDIT LOGS)
+    # =========================================================================
+
+    @app.get("/api/audit", dependencies=[Depends(require_session_token)])
+    async def get_audit_logs(limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, Any]]:
+        """Lấy danh sách các sự kiện kiểm toán gần nhất từ audit.jsonl (được che bí mật)."""
+        audit_file = app_config.data_dir / "audit.jsonl"
+        if not audit_file.is_file():
+            return []
+
+        entries: list[dict[str, Any]] = []
+        try:
+            with open(audit_file, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line_str = line.strip()
+                    if line_str:
+                        try:
+                            entries.append(json.loads(line_str))
+                        except Exception:
+                            pass
+        except Exception as err:
+            raise HTTPException(status_code=500, detail=f"Không thể đọc nhật ký kiểm toán: {err}")
+
+        # Trả về các dòng mới nhất lên đầu
+        return entries[-limit:][::-1]
 
     # =========================================================================
     # WEBSOCKET CHAT
     # =========================================================================
+
 
     @app.websocket("/ws/chat")
     async def websocket_chat(websocket: WebSocket) -> None:

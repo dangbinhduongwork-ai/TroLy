@@ -141,7 +141,7 @@ class AgentLoop:
                     )
                     yield StreamEvent(type="text_delta", content=f"\n[DỪNG AN TOÀN] {loop_err}\n")
                     context.add_message(
-                        Message(role="tool", content=f"[LỖI AN TOÀN] {loop_err}", tool_call_id=tc.id)
+                        Message(role="tool", content=f"[LỖI AN TOÀN] {loop_err}", tool_call_id=tc.id, name=tc.name)
                     )
                     return
 
@@ -153,7 +153,7 @@ class AgentLoop:
                     err_msg = f"Không tìm thấy công cụ mang tên '{tc.name}' trong hệ thống."
                     yield StreamEvent(type="text_delta", content=f"\n[LỖI] {err_msg}\n")
                     context.add_message(
-                        Message(role="tool", content=f"[LỖI] {err_msg}", tool_call_id=tc.id)
+                        Message(role="tool", content=f"[LỖI] {err_msg}", tool_call_id=tc.id, name=tc.name)
                     )
                     continue
 
@@ -189,7 +189,7 @@ class AgentLoop:
                     )
                     yield StreamEvent(type="text_delta", content=f"\n[TỪ CHỐI CỨNG] {reason}\n")
                     context.add_message(
-                        Message(role="tool", content=deny_summary, tool_call_id=tc.id)
+                        Message(role="tool", content=deny_summary, tool_call_id=tc.id, name=tc.name)
                     )
                     continue
 
@@ -219,7 +219,7 @@ class AgentLoop:
                             content=f"\n[Hệ thống] Bạn đã từ chối thực hiện công cụ '{tc.name}'.\n",
                         )
                         context.add_message(
-                            Message(role="tool", content=reject_summary, tool_call_id=tc.id)
+                            Message(role="tool", content=reject_summary, tool_call_id=tc.id, name=tc.name)
                         )
                         continue
                     decision_log = "APPROVED"
@@ -260,7 +260,7 @@ class AgentLoop:
 
                 # h) Lưu kết quả vào ngữ cảnh để gửi lại cho Model
                 context.add_message(
-                    Message(role="tool", content=tool_content, tool_call_id=tc.id)
+                    Message(role="tool", content=tool_content, tool_call_id=tc.id, name=tc.name)
                 )
 
         unique_tools = list(dict.fromkeys(s[0] for s in tool_call_history))

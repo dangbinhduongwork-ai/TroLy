@@ -10,6 +10,7 @@ Kiểm tra các kịch bản:
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+import time
 from typing import Any
 import pytest
 
@@ -74,6 +75,8 @@ class DummyNetworkChecker(NetworkChecker):
     def __init__(self, is_online_val: bool = True) -> None:
         super().__init__(cache_duration_sec=10)
         self.is_online_val = is_online_val
+        self._cached_is_online = is_online_val
+        self._last_check_time = time.time()
 
     async def is_online(self) -> bool:
         return self.is_online_val
@@ -315,3 +318,15 @@ async def test_explicit_modes(test_config: Config) -> None:
     async for _ in router.stream_chat(messages):
         pass
     assert gemini.call_count == 1
+
+
+def test_is_network_available(test_config: Config) -> None:
+    """Kiểm tra phương thức is_network_available của ModelRouter (Fix ERR-01)."""
+    net_online = DummyNetworkChecker(is_online_val=True)
+    router_online = ModelRouter(config=test_config, network_checker=net_online)
+    assert router_online.is_network_available() is True
+
+    net_offline = DummyNetworkChecker(is_online_val=False)
+    router_offline = ModelRouter(config=test_config, network_checker=net_offline)
+    assert router_offline.is_network_available() is False
+

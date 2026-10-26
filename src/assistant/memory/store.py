@@ -259,19 +259,35 @@ class MemoryStore:
             return []
 
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                """
-                SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title as conversation_title
-                FROM messages_fts f
-                JOIN messages m ON f.id = m.id
-                JOIN conversations c ON m.conversation_id = c.id
-                WHERE messages_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (q_clean, limit),
-            )
-            return [dict(r) for r in cursor.fetchall()]
+            try:
+                cursor = conn.execute(
+                    """
+                    SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title as conversation_title
+                    FROM messages_fts f
+                    JOIN messages m ON f.id = m.id
+                    JOIN conversations c ON m.conversation_id = c.id
+                    WHERE messages_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (q_clean, limit),
+                )
+                return [dict(r) for r in cursor.fetchall()]
+            except sqlite3.OperationalError:
+                # Nếu cú pháp MATCH chứa ký tự đặc biệt hoặc lỗi FTS5, fallback qua LIKE
+                cursor = conn.execute(
+                    """
+                    SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title as conversation_title
+                    FROM messages m
+                    JOIN conversations c ON m.conversation_id = c.id
+                    WHERE m.content LIKE ?
+                    ORDER BY m.created_at DESC
+                    LIMIT ?
+                    """,
+                    (f"%{q_clean}%", limit),
+                )
+                return [dict(r) for r in cursor.fetchall()]
+
 
     # =========================================================================
     # QUẢN LÝ TRÍ NHỚ DÀI HẠN (MEMORIES)

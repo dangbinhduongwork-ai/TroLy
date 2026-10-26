@@ -181,6 +181,70 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
 - **Thư viện mới**:
   - `pyinstaller>=6.5.0`: Đóng gói ứng dụng Python thành tệp nhị phân thực thi Windows.
 
+### [2026-10-27] Rà Soát Toàn Diện, Sửa Lỗi và Tái Cấu Trúc Giao Diện (Audit & Fixes)
+- **Bối cảnh**: Triển khai đợt rà soát mã nguồn toàn diện theo yêu cầu kiểm toán QA, khắc phục triệt để các lỗi P0 (sập app/endpoint), P1 (sai chức năng router, trí nhớ, FTS5, mở app, nhật ký, mã hóa), P2 (bảo mật hộp thoại duyệt, XSS DOMPurify, bảng markdown, WCAG AA, modular CSS, i18n), và P3 (kiểm thử tự động Playwright, tương thích import).
+- **Phương án đã chọn**:
+  1. **Định tuyến & Kiểm tra mạng (`ModelRouter.is_network_available`) (ERR-01)**:
+     - Bổ sung hàm uỷ quyền `is_network_available()` trong `ModelRouter`.
+     - Sử dụng cache 10 giây kết hợp với socket TCP đồng bộ timeout 0.4s (kiểm tra `1.1.1.1:53`) khi cache hết hạn, giải quyết triệt để lỗi `AttributeError` tại `/api/status`.
+  2. **Tương thích khởi tạo ReminderScheduler (ERR-02)**:
+     - Constructor `ReminderScheduler.__init__` chấp nhận cả tham số `store` và `reminder_store`.
+  3. **Nạp Trí Nhớ Vào System Prompt WebSocket (`ws.py`) (ERR-03)**:
+     - Trong `_handle_chat_turn()`, tự động trích xuất các trí nhớ dài hạn phù hợp nhất (`context.get_relevant_memories(self.memory_store)`) và nạp vào `get_system_prompt(memories=...)`, đảm bảo trợ lý duy trì ngữ cảnh người dùng trên giao diện Web Desktop.
+  4. **Tìm kiếm FTS5 An Toàn (`store.py`) (ERR-04)**:
+     - Bọc câu lệnh truy vấn SQLite FTS5 `MATCH` trong khối `try...except sqlite3.OperationalError` và tự động fallback sang SQL `LIKE %query%` khi người dùng nhập các ký tự đặc biệt (dấu nháy, dấu sao, toán tử FTS5).
+  5. **So Khớp Tên Ứng Dụng Chuẩn Xác (`apps.py`) (ERR-05)**:
+     - Thay thế so khớp chuỗi con lỏng lẻo (`alias in query`) bằng so khớp chính xác tuyệt đối (`query == alias`), tiếp theo là so khớp theo ranh giới từ Regex (`\b`), loại bỏ hiện tượng gõ "developer" bị mở Paint.
+  6. **Endpoint và Giao Diện Nhật Ký Kiểm Toán (`/api/audit` & `#screen-audit`) (ERR-06)**:
+     - Cung cấp API `GET /api/audit` đọc danh sách sự kiện từ `audit.jsonl` (đã được lọc secret).
+     - Bổ sung tab điều hướng "📋 Nhật ký" và màn hình bảng biểu kiểm toán trên giao diện người dùng.
+  7. **Hỗ Trợ Tiếng Việt Console Windows (`main.py`) (ERR-07)**:
+     - Gọi `sys.stdout.reconfigure(encoding="utf-8")` và `sys.stderr.reconfigure(encoding="utf-8")` khi khởi động trên Windows, tránh lỗi `UnicodeEncodeError`.
+  8. **Bảo Mật Hộp Thoại Duyệt Quyền Bàn Phím (`app.js`) (ERR-08)**:
+     - Triển khai Keyboard Focus Trap bên trong Approval Modal.
+     - Phím `Escape` kích hoạt từ chối an toàn.
+     - Phím `Enter` bị chặn tự động duyệt để tránh người dùng gõ phím vô tình chấp thuận lệnh nguy hiểm. Nút Từ chối luôn được focus mặc định khi mở modal.
+  9. **Trình Phân Tích Markdown Bảng & Vệ Sinh Mã Độc Offline (ERR-09, ERR-10)**:
+     - Thêm phân tích bảng dữ liệu Markdown và bao bọc trong `.table-container` có hỗ trợ cuộn ngang.
+     - Tích hợp `DOMPurify` ngoại tuyến (`vendor/purify.min.js`), triệt tiêu hoàn toàn nguy cơ XSS / Script Injection mà không tải bất kỳ script nào từ CDN internet.
+  10. **Tách Lớp CSS & Chuẩn Màu WCAG AA (`tokens.css`, `base.css`, `layout.css`, `components.css`) (ERR-11)**:
+      - Tách nhỏ `style.css` thành hệ thống Design Tokens.
+      - Chỉnh sửa màu `--text-muted` thành `#64748b` (tỷ lệ tương phản 4.6:1, đạt chuẩn WCAG AA).
+      - Rút ngắn thời gian transition xuống <= 150ms và hỗ trợ `@media (prefers-reduced-motion)`.
+  11. **Quốc Tế Hóa Cục Bộ (`i18n/vi.json`) (ERR-12)**:
+      - Gom toàn bộ chuỗi văn bản giao diện vào `src/assistant/ui_static/i18n/vi.json` với helper `t(key)`.
+  12. **Bộ Công Cụ Kiểm Thử Tự Động Playwright Đa Độ Phân Giải (`scripts/ui_check.py`) (ERR-13)**:
+      - Kiểm tra tự động 3 độ phân giải (900x600, 1280x800, 1920x1080) và 2 chủ đề (sáng/tối).
+      - Giám sát nghiêm ngặt mọi network request (chỉ cho phép `127.0.0.1`), bắt lỗi console, đo đạc layout và chụp ảnh lưu vào `docs/ui-shots/`.
+- **Lý do**: Giải quyết triệt để toàn bộ danh sách khiếm khuyết được phát hiện, tuân thủ nghiêm ngặt 12 Nguyên tắc bất biến và chuẩn mực kỹ thuật cao nhất.
+- **Thư viện mới**:
+  - `playwright>=1.42.0`: Công cụ kiểm thử tự động trình duyệt đa độ phân giải phục vụ QA giao diện (chỉ dùng trong môi trường dev).
+
+### [2026-10-27] Khắc phục 5 lỗi kỹ thuật về Cấu hình, Model Routing, WebSocket và Gemini Tool Call
+- **Bối cảnh**:
+  - Lỗi 1: `NameError: name 're' is not defined` trong `app.py` khi đổi model cục bộ tại route POST `/api/settings/local-model`. Ngoài ra, GET `/api/status` dùng nhầm thuộc tính `last_used_model` (thực tế là `last_model_used`) và hardcode `daily_requests_count: 0`.
+  - Lỗi 2: WebSocket `ws.py` lưu sai `model_used` do dùng nhầm `last_used_model`, đồng thời sự kiện `turn_done` luôn trả về mảng rỗng `tools_called: []` do không gom các sự kiện `tool_start` trong lượt.
+  - Lỗi 3: Gemini API báo lỗi 400 Bad Request khi phản hồi kết quả công cụ vì `Part.from_function_response` nhận `tool_call_id` (ví dụ `call_xyz`) thay vì tên hàm đã khai báo (`name`).
+  - Lỗi 4: Khi đóng gói bằng PyInstaller (`--onedir` / `--onefile`), `load_config()` tìm file `config/settings.toml` và `.env` theo `Path(__file__)` bên trong gói dẫn tới thất lạc cấu hình ngoài file thực thi exe.
+- **Phương án đã chọn**:
+  1. Trong `src/assistant/server/app.py`:
+     - Bổ sung `import re` và `import sys`.
+     - Route POST `/api/settings/local-model` quét các đường dẫn ứng viên (bao gồm thư mục chứa file exe khi đóng gói) và dùng biểu thức chính quy ghi đè chính xác tên model vào `config/settings.toml`.
+     - Route GET `/api/status` sử dụng `getattr(app_router, "last_model_used", ...)` và lấy số request thực tế trong ngày từ `app_router.usage_tracker.get_count()`.
+  2. Trong `src/assistant/server/ws.py`:
+     - Chuyển `last_used_model` thành `last_model_used` khi lưu vào bảng `messages` SQLite và khi gửi `turn_done`.
+     - Khởi tạo danh sách `tools_called_in_turn` và bắt sự kiện `tool_start` / `turn_done` trong `_on_event` để thu thập đầy đủ các công cụ đã được gọi.
+  3. Trong `src/assistant/llm/base.py` & `src/assistant/llm/gemini_provider.py` & `src/assistant/core/agent_loop.py`:
+     - Bổ sung trường `name: str | None` trong `Message` cho role `tool`.
+     - Khi `agent_loop.py` tạo tin nhắn phản hồi công cụ, gán tường minh `name=tc.name`.
+     - Trong `gemini_provider.py`, xây dựng bảng tra cứu từ `tool_call_id` sang `function name` từ lịch sử các `tool_calls` trước đó để luôn truyền đúng function name cho `types.Part.from_function_response(name=func_name, ...)`.
+  4. Trong `src/assistant/config.py`:
+     - Kiểm tra `getattr(sys, "frozen", False)`. Nếu ứng dụng đang chạy dưới dạng exe đã đóng gói, xác định thư mục gốc thông qua `Path(sys.executable).parent` (ưu tiên cấu hình người dùng đặt cạnh file exe) và fallback sang `Path(sys._MEIPASS)` (thư mục bundle nội bộ). Tự động nạp `.env` từ cả hai vị trí này.
+     - Cập nhật giá trị model cục bộ mặc định thành `qwen2.5:14b` đồng bộ với card đồ họa RTX 3060 12GB và file `config/settings.toml`.
+- **Lý do**:
+  - Tuân thủ triệt để 12 Nguyên tắc bất biến (Nguyên tắc 1: Đúng phạm vi, Nguyên tắc 2: An toàn bảo mật, Nguyên tắc 6: Thư viện chuẩn xác, Nguyên tắc 7: Mã sạch & kiểm thử).
+- **Thư viện mới**: Không có.
+
 
 
 

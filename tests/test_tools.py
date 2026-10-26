@@ -103,3 +103,21 @@ def test_schema_adapters_output() -> None:
     # Chuyển đổi sang Gemini format
     gemini_tools = to_gemini_tools(schemas)
     assert len(gemini_tools) > 0
+
+
+def test_open_app_word_boundary_matching(monkeypatch) -> None:
+    """Kiểm tra open_app chỉ khớp từ hoàn chỉnh, không bắt nhầm chuỗi con (Fix ERR-05)."""
+    from unittest.mock import MagicMock, patch
+    from assistant.tools.apps import open_app
+
+    with patch("subprocess.Popen") as mock_popen, patch("assistant.tools.apps._get_start_menu_shortcuts", return_value=[]):
+        # 1. Từ "developer" không được khớp với alias "ve" (Paint)
+        res_dev = open_app("developer")
+        assert res_dev["ok"] is False
+        mock_popen.assert_not_called()
+
+        # 2. Khớp chính xác "notepad"
+        res_np = open_app("notepad")
+        assert res_np["ok"] is True
+        mock_popen.assert_called_with(["notepad.exe"], shell=False)
+

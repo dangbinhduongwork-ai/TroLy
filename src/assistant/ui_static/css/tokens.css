@@ -1,0 +1,61 @@
+/**
+ * DESIGN TOKENS (tokens.css) - Trợ Lý AI
+ * Tuân thủ:
+ * - Chuẩn độ tương phản WCAG AA (>= 4.5:1) ở cả hai chủ đề Sáng và Tối.
+ * - Font chữ hệ thống ưu tiên "Segoe UI Variable", có "Segoe UI" làm dự phòng.
+ * - Hiệu ứng chuyển động chuẩn <= 150ms.
+ */
+
+:root {
+    --font-stack: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: "Cascadia Code", Consolas, "Courier New", monospace;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.25);
+    --transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* CHỦ ĐỀ TỐI (DARK THEME - MẶC ĐỊNH) */
+body.dark-theme {
+    --bg-primary: #12141a;
+    --bg-secondary: #1a1e27;
+    --bg-tertiary: #232936;
+    --bg-glass: rgba(26, 30, 39, 0.85);
+    --text-primary: #f0f3f8;
+    --text-secondary: #9aa5b8;
+    --text-muted: #7e8b9f;
+    --border-color: #2b3345;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --accent-glow: rgba(59, 130, 246, 0.25);
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --user-bubble: #1e3a8a;
+    --assistant-bubble: #1e2430;
+    --code-bg: #11141c;
+}
+
+/* CHỦ ĐỀ SÁNG (LIGHT THEME - WCAG AA COMPLIANT) */
+body.light-theme {
+    --bg-primary: #f4f6fa;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #eaeff8;
+    --bg-glass: rgba(255, 255, 255, 0.9);
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b; /* Contrast ratio 4.6:1 đạt chuẩn WCAG AA */
+    --border-color: #cbd5e1;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-glow: rgba(37, 99, 235, 0.15);
+    --success: #047857;
+    --warning: #b45309;
+    --danger: #b91c1c;
+    --user-bubble: #2563eb;
+    --assistant-bubble: #ffffff;
+    --code-bg: #f8fafc;
+}

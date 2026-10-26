@@ -1,0 +1,472 @@
+/**
+ * UI COMPONENTS (components.css) - Trợ Lý AI
+ */
+
+/* NÚT BẤM (BUTTONS) VỚI ĐẦY ĐỦ TRẠNG THÁI HOVER, FOCUS, DISABLED */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+.btn-primary {
+    background-color: var(--accent);
+    color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background-color: var(--accent-hover);
+    box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.btn-outline {
+    background-color: transparent;
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-outline:hover:not(:disabled) {
+    background-color: var(--bg-tertiary);
+    border-color: var(--text-secondary);
+}
+
+.btn-danger {
+    background-color: var(--danger);
+    color: #ffffff;
+}
+
+.btn-danger:hover:not(:disabled) {
+    filter: brightness(0.9);
+}
+
+.btn-success {
+    background-color: var(--success);
+    color: #ffffff;
+}
+
+.btn-success:hover:not(:disabled) {
+    filter: brightness(0.9);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-sm {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.82rem;
+}
+
+/* THẺ TRẠNG THÁI & HUY HIỆU (BADGES) */
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.badge-info, .badge-read {
+    background-color: rgba(59, 130, 246, 0.15);
+    color: var(--accent);
+}
+
+.badge-write_safe {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+}
+
+.badge-confirm, .badge-warning {
+    background-color: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+}
+
+.badge-danger {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+}
+
+.badge-success {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+}
+
+/* KHỐI TIN NHẮN CHAT */
+.message-row {
+    display: flex;
+    gap: 0.75rem;
+    max-width: 85%;
+}
+
+.message-row.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+}
+
+.message-row.assistant {
+    align-self: flex-start;
+}
+
+.message-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    background-color: var(--bg-tertiary);
+    flex-shrink: 0;
+}
+
+.message-bubble {
+    padding: 0.85rem 1.15rem;
+    border-radius: var(--radius-md);
+    background-color: var(--assistant-bubble);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.message-row.user .message-bubble {
+    background-color: var(--user-bubble);
+    color: #ffffff;
+    border-color: transparent;
+}
+
+.message-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.meta-badge {
+    background-color: var(--bg-tertiary);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+}
+
+/* BẢNG MARKDOWN RỘNG CÓ CUỘN NGANG */
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.markdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    text-align: left;
+}
+
+.markdown-table th, .markdown-table td {
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+}
+
+.markdown-table th {
+    background-color: var(--bg-tertiary);
+    font-weight: 600;
+}
+
+.markdown-table tr:last-child td {
+    border-bottom: none;
+}
+
+.markdown-table th:last-child, .markdown-table td:last-child {
+    border-right: none;
+}
+
+/* KHỐI MÃ NGUỒN (CODE BLOCKS) VỚI NÚT SAO CHÉP */
+.code-container {
+    background-color: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    margin: 0.75rem 0;
+    overflow: hidden;
+}
+
+.code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.35rem 0.75rem;
+    background-color: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.btn-copy-code {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-copy-code:hover {
+    background-color: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+}
+
+.code-container pre {
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    margin: 0;
+}
+
+.code-container code {
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+/* TOOL EXECUTION PILLS */
+.tool-pill-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.5rem;
+}
+
+.tool-call-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.65rem;
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* HỘP THOẠI DUYỆT QUYỀN & MODALS */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+.modal-card {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    width: 90%;
+    max-width: 520px;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.modal-header.warning {
+    border-top: 3px solid var(--warning);
+}
+
+.modal-body {
+    padding: 1.25rem;
+    overflow-y: auto;
+    max-height: 65vh;
+}
+
+.modal-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    background-color: var(--bg-tertiary);
+}
+
+.approval-info-box {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+    margin: 0.75rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.info-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.info-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.info-value {
+    font-size: 0.88rem;
+    color: var(--text-primary);
+}
+
+.code-box {
+    background-color: var(--code-bg);
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+/* THẺ CÀI ĐẶT & CHẨN ĐOÁN (SETTINGS SCREEN) */
+.settings-container, .audit-container, .memories-container, .reminders-container {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.settings-grid, .memories-grid, .reminders-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 1.25rem;
+}
+
+.settings-card, .memory-card, .reminder-card {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.card-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+
+/* BẢNG NHẬT KÝ KIỂM TOÁN (AUDIT TABLE) */
+.audit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.audit-table th, .audit-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+}
+
+.audit-table th {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.col-time {
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.audit-details-box {
+    margin: 0;
+    background-color: var(--code-bg);
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    max-height: 60px;
+    overflow-y: auto;
+}
+
+.empty-state, .error-state {
+    text-align: center;
+    padding: 2.5rem 1rem !important;
+    color: var(--text-muted);
+}
+
+.error-state {
+    color: var(--danger);
+}
+
+/* THẺ VÀ HUY HIỆU MÔ HÌNH OLLAMA */
+.model-tag {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.25rem 0.65rem;
+    border-radius: 14px;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition);
+    user-select: none;
+}
+
+.model-tag:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.model-tag.active {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.active-local-badge {
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 600;
+    margin-left: 0.5rem;
+}

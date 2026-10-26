@@ -35,6 +35,12 @@ class OllamaProvider(LLMProvider):
     def default_model(self) -> str:
         return self._model_name
 
+    def set_model(self, model_name: str) -> None:
+        """Đổi mô hình Ollama cục bộ đang hoạt động."""
+        clean_name = model_name.strip()
+        if clean_name:
+            self._model_name = clean_name
+
     async def is_available(self) -> bool:
         """Kiểm tra máy chủ Ollama có đang hoạt động trên máy hay không."""
         try:
@@ -101,8 +107,32 @@ class OllamaProvider(LLMProvider):
                 ]
             formatted_messages.append(msg_dict)
 
+        # Tự động kiểm tra và giải quyết model name nếu model chỉ định chưa khớp chính xác
+        active_model = self._model_name
+        installed: list[str] = []
+        try:
+            installed = await self.list_models()
+        except Exception:
+            pass
+
+        if installed:
+            # 1. Khớp chính xác
+            if active_model in installed:
+                pass
+            # 2. Khớp tag :latest (ví dụ qwen2.5:14b khớp với qwen2.5:14b:latest hoặc ngược lại)
+            elif f"{active_model}:latest" in installed:
+                active_model = f"{active_model}:latest"
+            elif any(m.startswith(f"{active_model}:") for m in installed):
+                active_model = next(m for m in installed if m.startswith(f"{active_model}:"))
+            elif any(m.split(":")[0] == active_model.split(":")[0] for m in installed):
+                # Khớp cùng họ, ví dụ cấu hình qwen2.5:7b nhưng máy chỉ có qwen2.5:14b
+                active_model = next(m for m in installed if m.split(":")[0] == active_model.split(":")[0])
+            elif len(installed) == 1:
+                # Nếu chỉ cài 1 model duy nhất trong Ollama, dùng luôn model đó
+                active_model = installed[0]
+
         payload: dict[str, Any] = {
-            "model": self._model_name,
+            "model": active_model,
             "messages": formatted_messages,
             "stream": True,
         }
@@ -115,14 +145,17 @@ class OllamaProvider(LLMProvider):
         url = f"{self._host}/v1/chat/completions"
 
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+            # Timeout 180s để model lớn (14b/32b) có đủ thời gian load vào VRAM/RAM
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0, read=180.0)) as client:
                 async with client.stream("POST", url, json=payload) as response:
                     if response.status_code == 404:
+                        installed_str = ", ".join(installed) if installed else "Chưa có model nào"
                         raise ProviderError(
                             kind="unknown",
                             message=(
-                                f"Model '{self._model_name}' chưa được cài đặt trong Ollama. "
-                                f"Vui lòng chạy lệnh: 'ollama pull {self._model_name}'"
+                                f"Model '{active_model}' chưa được cài đặt trong Ollama. "
+                                f"Các model hiện có trong máy: [{installed_str}]. "
+                                f"Vui lòng chạy lệnh: 'ollama pull {active_model}' hoặc chọn model có sẵn trong trang Cài đặt."
                             ),
                         )
                     if response.status_code != 200:

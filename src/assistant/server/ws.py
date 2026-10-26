@@ -18,13 +18,16 @@ import uuid
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from assistant.config import Config, load_config
 from assistant.core.agent_loop import AgentLoop
 from assistant.core.context import ConversationContext
 from assistant.core.prompts import get_system_prompt
 from assistant.core.router import ModelRouter
+from assistant.llm.base import Message
 from assistant.memory.extractor import extract_and_save_memories
 from assistant.memory.store import MemoryStore
 from assistant.tools.registry import default_tool_registry
+
 
 logger = logging.getLogger("assistant.server.ws")
 
@@ -37,14 +40,17 @@ class ChatWebSocketManager:
         router: ModelRouter,
         memory_store: MemoryStore,
         token_verifier: Callable[[str], bool],
+        config: Config | None = None,
     ) -> None:
         self.router = router
         self.memory_store = memory_store
         self.verify_token = token_verifier
+        self.config = config or load_config(create_dirs=False)
         # Bản đồ lưu các yêu cầu duyệt quyền đang chờ: request_id -> asyncio.Future[bool]
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         # Task đang chạy của mỗi kết nối WebSocket
         self.active_tasks: dict[WebSocket, asyncio.Task[Any]] = {}
+
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         """Xử lý vòng đời của một kết nối WebSocket."""
@@ -90,11 +96,11 @@ class ChatWebSocketManager:
                                 "text_delta",
                                 {"content": "\n\n[Đã dừng câu trả lời theo yêu cầu người dùng]"},
                             )
-                            await self._send_event(
-                                websocket,
-                                "turn_done",
-                                {"tools_called": [], "cancelled": True},
-                            )
+                    await self._send_event(
+                        websocket,
+                        "turn_done",
+                        {"tools_called": [], "cancelled": True},
+                    )
                     continue
 
                 # c) Người dùng gửi tin nhắn trò chuyện mới
@@ -120,6 +126,16 @@ class ChatWebSocketManager:
                             is_sensitive=is_sensitive,
                         )
                     )
+
+                    def _on_task_finished(t: asyncio.Task) -> None:
+                        try:
+                            t.result()
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as exc:
+                            logger.error("Lỗi tác vụ chat ngầm: %s", exc)
+
+                    task.add_done_callback(_on_task_finished)
                     self.active_tasks[websocket] = task
 
         except WebSocketDisconnect:
@@ -176,11 +192,7 @@ class ChatWebSocketManager:
         context = ConversationContext(max_tokens=3500)
         recent_messages = self.memory_store.get_messages(conv_id, limit=20)
         for m in recent_messages:
-            context.add_message_from_dict(
-                role=m["role"],
-                content=m["content"],
-                model_used=m.get("model_used"),
-            )
+            context.add_message(Message(role=m.get("role", "user"), content=m.get("content") or ""))
 
         # 4. Thiết lập chế độ router tạm thời nếu được yêu cầu
         orig_mode = self.router.mode
@@ -228,11 +240,25 @@ class ChatWebSocketManager:
                 self.pending_approvals.pop(req_id, None)
 
         # 6. Định nghĩa bộ lắng nghe sự kiện để truyền xuống WebSocket
+        tools_called_in_turn: list[str] = []
+
         async def _on_event(event_name: str, payload: dict[str, Any]) -> None:
+            if event_name == "tool_start":
+                tname = payload.get("tool_name")
+                if tname and tname not in tools_called_in_turn:
+                    tools_called_in_turn.append(str(tname))
+            elif event_name == "turn_done":
+                for t in payload.get("tools_called", []):
+                    if t and t not in tools_called_in_turn:
+                        tools_called_in_turn.append(str(t))
             await self._send_event(websocket, event_name, payload)
 
-        # 7. Khởi chạy AgentLoop
-        system_prompt = get_system_prompt()
+        # 7. Lấy danh sách trí nhớ liên quan và khởi tạo System Prompt
+        active_memories = context.get_relevant_memories(self.memory_store, max_tokens=600, max_memories=15)
+        system_prompt = get_system_prompt(
+            timezone_str=self.config.timezone,
+            memories=active_memories,
+        )
         agent_loop = AgentLoop(
             router=self.router,
             registry=default_tool_registry,
@@ -241,7 +267,6 @@ class ChatWebSocketManager:
         )
 
         accumulated_text: list[str] = []
-        tools_called_in_turn: list[str] = []
 
         try:
             async for ev in agent_loop.run_turn(
@@ -256,7 +281,7 @@ class ChatWebSocketManager:
                     pass
 
             full_response = "".join(accumulated_text).strip()
-            model_used_name = getattr(self.router, "last_used_model", None) or self.router.mode
+            model_used_name = getattr(self.router, "last_model_used", None) or self.router.mode
 
             # 8. Lưu câu trả lời của trợ lý vào SQLite
             if full_response:
@@ -293,9 +318,11 @@ class ChatWebSocketManager:
 
         except asyncio.CancelledError:
             logger.info("Lượt xử lý câu hỏi đã bị người dùng huỷ.")
+            await self._send_event(websocket, "turn_done", {"conversation_id": conv_id or ""})
         except Exception as err:
             logger.error("Lỗi trong quá trình xử lý lượt chat: %s", err)
             await self._send_event(websocket, "error", {"error": f"Lỗi xử lý: {err}"})
+            await self._send_event(websocket, "turn_done", {"conversation_id": conv_id or ""})
         finally:
             # Khôi phục lại chế độ router ban đầu
             self.router.set_mode(orig_mode)

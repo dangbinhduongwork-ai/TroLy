@@ -278,9 +278,13 @@ TroLy/
 ├── config/
 │   └── settings.toml       # Tham số cấu hình hệ thống mặc định
 ├── docs/
-│   └── DECISIONS.md        # Nhật ký quyết định kiến trúc và thư viện (ADR)
+│   ├── DECISIONS.md        # Nhật ký quyết định kiến trúc và thư viện (ADR)
+│   ├── AUDIT.md            # Bảng kiểm toán lỗi, phân loại P0-P3 và lộ trình sửa
+│   └── QA.md               # Báo cáo kiểm định chất lượng, hồi quy và hiệu năng
 ├── scripts/
 │   ├── check_env.py        # Kiểm tra môi trường Python 3.11+ và Git
+│   ├── verify_all.bat      # Kiểm toán mã nguồn Ruff, Pytest và UI Playwright
+│   ├── ui_check.py         # Kiểm thử tự động giao diện Playwright đa kích thước
 │   ├── build_exe.py        # Kịch bản đóng gói PyInstaller & tạo shortcut Desktop
 │   ├── build_app.bat       # Trình đóng gói một nhấp chuột cho Windows
 │   ├── run_app.bat         # Trình khởi chạy nhanh giao diện Desktop

@@ -110,3 +110,15 @@ def test_context_load_from_store_and_memories_budget(tmp_path) -> None:
     # Vì mỗi memory khá dài, ngân sách 100 token sẽ chỉ lấy được số lượng hạn chế
     assert len(relevant) < 10
 
+
+def test_context_add_message_from_dict() -> None:
+    """Kiểm tra phương thức add_message_from_dict nạp dữ liệu đúng."""
+    ctx = ConversationContext()
+    ctx.add_message_from_dict(role="user", content="Chào trợ lý")
+    ctx.add_message_from_dict(role="assistant", content="Xin chào bạn!")
+    assert len(ctx.messages) == 2
+    assert ctx.messages[0].role == "user"
+    assert ctx.messages[0].content == "Chào trợ lý"
+    assert ctx.messages[1].role == "assistant"
+    assert ctx.messages[1].content == "Xin chào bạn!"
+

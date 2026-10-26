@@ -19,7 +19,7 @@ log_level = "INFO"
 gemini_model = "gemini-2.5-flash"
 
 # Model cục bộ chạy qua Ollama (khi mất mạng hoặc dữ liệu nhạy cảm)
-local_model = "qwen2.5:7b"
+local_model = "qwen2.5:14b"
 
 # Địa chỉ máy chủ Ollama
 ollama_host = "http://127.0.0.1:11434"
