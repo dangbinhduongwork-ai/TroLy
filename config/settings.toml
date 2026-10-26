@@ -1,0 +1,26 @@
+# Cấu hình mặc định của ứng dụng Trợ Lý AI
+# Có thể ghi đè các giá trị này qua file .env hoặc biến môi trường tương ứng
+
+[general]
+# Thư mục làm việc an toàn trên máy tính
+workspace_dir = "C:\\AI_Workspace"
+
+# Thư mục lưu dữ liệu ứng dụng. Để trống sẽ mặc định dùng: %APPDATA%\\AIAssistant
+data_dir = ""
+
+# Múi giờ hệ thống
+timezone = "Asia/Ho_Chi_Minh"
+
+# Mức độ ghi log (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+log_level = "INFO"
+
+[models]
+# Model đám mây qua Gemini API (khi có mạng)
+gemini_model = "gemini-2.5-flash"
+
+# Model cục bộ chạy qua Ollama (khi mất mạng hoặc dữ liệu nhạy cảm)
+local_model = "qwen2.5:7b"
+
+[server]
+# Cổng web UI cục bộ
+ui_port = 8000
