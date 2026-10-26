@@ -17,7 +17,7 @@ import sys
 from typing import Any
 
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, WebSocket, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Security, UploadFile, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
@@ -34,6 +34,8 @@ from assistant.server.schemas import (
     ConversationItem,
     ConversationUpdate,
     DiagnosticsResponse,
+    FileUploadResponse,
+    HotkeyUpdateRequest,
     KeyUpdateRequest,
     MemoryCreate,
     MemoryItem,
@@ -466,6 +468,88 @@ def create_app(
         else:
             success = disable_autostart()
         return {"ok": success, "autostart_enabled": is_autostart_enabled()}
+
+    @app.get("/api/settings/hotkey", dependencies=[Depends(require_session_token)])
+    async def get_hotkey_settings() -> dict[str, Any]:
+        """Lấy trạng thái cấu hình phím tắt toàn cục Spotlight Mode."""
+        from assistant.desktop.hotkey import get_hotkey_manager
+        mgr = get_hotkey_manager()
+        return {
+            "ok": True,
+            "enabled": mgr.is_enabled(),
+            "shortcut": "Ctrl+Shift+Space",
+        }
+
+    @app.post("/api/settings/hotkey", dependencies=[Depends(require_session_token)])
+    async def update_hotkey_settings(req: HotkeyUpdateRequest) -> dict[str, Any]:
+        """Bật hoặc tắt phím tắt toàn cục Spotlight Mode."""
+        from assistant.desktop.hotkey import get_hotkey_manager
+        mgr = get_hotkey_manager()
+        mgr.set_enabled(req.enabled)
+        return {
+            "ok": True,
+            "enabled": mgr.is_enabled(),
+            "shortcut": "Ctrl+Shift+Space",
+        }
+
+    # =========================================================================
+    # REST API: TẢI TỆP TIN LÊN WORKSPACE (FILE UPLOAD / DRAG & DROP)
+    # =========================================================================
+
+    @app.post("/api/upload-file", response_model=FileUploadResponse, dependencies=[Depends(require_session_token)])
+    async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+        """Tải tệp tin lên thư mục làm việc an toàn (Workspace) qua Kéo-Thả.
+
+        - Kiểm tra tên tệp an toàn, chống path traversal bằng resolve_in_workspace().
+        - Giới hạn kích thước tối đa 25MB (25 * 1024 * 1024 bytes).
+        - Ghi tệp an toàn theo từng khối (chunk) vào workspace_dir.
+        """
+        from assistant.safety.paths import PathSecurityError, resolve_in_workspace
+
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Tên tệp không được để trống.")
+
+        # Lấy tên file gốc an toàn, loại bỏ tiền tố đường dẫn nguy hiểm
+        raw_name = Path(file.filename).name.strip()
+        if not raw_name:
+            raise HTTPException(status_code=400, detail="Tên tệp không hợp lệ.")
+
+        try:
+            target_path = resolve_in_workspace(raw_name, workspace_dir=app_config.workspace_dir)
+        except PathSecurityError as err:
+            raise HTTPException(status_code=400, detail=f"Tên tệp vi phạm an toàn bảo mật: {err}")
+
+        # Dung lượng tối đa: 25MB
+        max_bytes = 25 * 1024 * 1024
+        total_size = 0
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with target_path.open("wb") as out_f:
+                while chunk := await file.read(64 * 1024):
+                    total_size += len(chunk)
+                    if total_size > max_bytes:
+                        out_f.close()
+                        if target_path.is_file():
+                            target_path.unlink(missing_ok=True)
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Dung lượng tệp vượt quá giới hạn tối đa cho phép (25MB).",
+                        )
+                    out_f.write(chunk)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Lỗi khi ghi tệp tải lên: %s", exc)
+            raise HTTPException(status_code=500, detail=f"Lỗi ghi tệp lên đĩa: {exc}")
+
+        return {
+            "ok": True,
+            "filename": raw_name,
+            "path": str(target_path),
+            "size": total_size,
+            "message": f"Đã tải tệp '{raw_name}' ({total_size} bytes) lên thư mục làm việc an toàn.",
+        }
 
     # =========================================================================
     # REST API: NHẬT KÝ KIỂM TOÁN (AUDIT LOGS)

@@ -337,4 +337,43 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   - Tối ưu hóa vượt bậc khả năng hiểu ngữ nghĩa và gợi nhớ của trợ lý, duy trì hoạt động cục bộ 100% trên Windows và giữ vững nguyên tắc bảo mật, không phụ thuộc thư viện nặng.
 - **Thư viện mới**: Không có (sử dụng thư viện chuẩn `math`, `struct` và `httpx` đã có).
 
+### [2026-10-27] Hỗ trợ Kéo-thả tập tin (Drag & Drop) và Phím tắt toàn cục (Global Hotkey / Spotlight Mode)
+- **Bối cảnh**:
+  - Người dùng cần gửi nhanh tài liệu (PDF, Word, Excel, Text, Code) vào cuộc trò chuyện mà không cần gõ đường dẫn thủ công.
+  - Người dùng cần gọi nhanh Trợ lý từ bất kỳ ứng dụng hoặc màn hình nào trên Windows thông qua phím tắt toàn cục để tra cứu tức thì (Spotlight Mode).
+- **Phương án đã chọn**:
+  1. Kéo-thả tập tin (Drag & Drop File Upload):
+     - Web UI (`index.html`, `layout.css`, `components.css`, `app.js`):
+       + Tạo Dropzone overlay hiển thị khi kéo tệp tin vào khung chat (`dragenter`, `dragover`, `dragleave`, `drop`).
+       + Sử dụng biến đếm `dragCounter` để loại bỏ hiện tượng nhấp nháy (flicker) khi con trỏ chuột lướt qua các phần tử con.
+       + Khi thả file: Tải file lên server qua API `POST /api/upload-file` với `FormData`.
+       + Sau khi upload thành công: Tự động chuyển về khung chat và điền câu lệnh: `"Hãy tóm tắt và phân tích nội dung file: <tên_file>"`, đồng thời đặt con trỏ vào ô nhập chat.
+     - Server (`src/assistant/server/app.py` & `schemas.py`):
+       + Endpoint `POST /api/upload-file` nhận `UploadFile` (yêu cầu Session Token bảo vệ chống CSRF/SSRF).
+       + Trích xuất tên tệp an toàn bằng `Path(file.filename).name.strip()`.
+       + Kiểm tra an toàn đường dẫn tuyệt đối bằng `resolve_in_workspace(raw_name, workspace_dir=app_config.workspace_dir)` nhằm ngăn chặn hoàn toàn tấn công path traversal (`../`) và tên thiết bị cấm của Windows (`CON`, `NUL`, v.v.).
+       + Ghi tệp an toàn theo từng khối (chunk 64KB) và giới hạn kích thước tối đa 25MB (25 * 1024 * 1024 bytes). Nếu vượt quá kích thước, huỷ ghi và dọn dẹp ngay phần tệp dở dang.
+  2. Phím tắt toàn cục (Global Hotkey / Spotlight Mode):
+     - `src/assistant/desktop/hotkey.py`:
+       + Sử dụng 100% thư viện chuẩn `ctypes` gọi Windows API `RegisterHotKey` và `UnregisterHotKey` (tuân thủ Nguyên tắc 11: không dùng thêm thư viện hook bàn phím nặng).
+       + Phím tắt mặc định: `Ctrl + Shift + Space` (`MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT`, phím `VK_SPACE`).
+       + Luồng riêng biệt xử lý Message Loop (`GetMessageW`, `TranslateMessage`, `DispatchMessageW`) và dừng sạch sẽ thông qua `PostThreadMessageW(WM_QUIT)`.
+       + Khi kích hoạt:
+         1. Gọi `activate_spotlight_mode()`: Quét tìm HWND cửa sổ Trợ lý qua `EnumWindows` và đưa lên trên cùng bằng `SetForegroundWindow` (vượt qua cơ chế chặn của Windows bằng `AttachThreadInput`).
+         2. Phát tín hiệu WebSocket `{ "type": "focus_input" }` tới Web UI client để tự động đặt con trỏ vào ô nhập chat.
+     - Web UI Settings & REST API:
+       + Endpoint `GET /api/settings/hotkey` và `POST /api/settings/hotkey` để kiểm tra và bật/tắt phím tắt động.
+       + Bổ sung công tắc bật/tắt trong màn hình Cài đặt của Web UI (`#chk-hotkey`).
+  3. Kiểm thử tự động (`tests/test_upload_and_hotkey.py`):
+     - Kiểm thử tải file hợp lệ và lưu đúng nội dung vào workspace.
+     - Kiểm thử phòng vệ Path Traversal và tên tệp cấm Windows.
+     - Kiểm thử chặn tệp vượt quá 25MB.
+     - Kiểm thử yêu cầu xác thực Session Token.
+     - Kiểm thử API cấu hình phím tắt và vòng đời `GlobalHotkeyManager`.
+- **Lý do**:
+  - Nâng cấp trải nghiệm người dùng tương tự các trợ lý AI Desktop cao cấp (Spotlight / Raycast), giữ vững 100% nguyên tắc an toàn, không rò rỉ bộ nhớ hay xung đột luồng.
+- **Thư viện mới**:
+  - `python-multipart>=0.0.9`: Thư viện chuẩn được FastAPI yêu cầu chính thức để xử lý form-data và file upload streaming.
+
+
 

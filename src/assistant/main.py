@@ -693,7 +693,7 @@ def run_ui(
         print("Chế độ chạy    : Chạy ngầm ở khay hệ thống (minimized)")
     print("=" * 65)
 
-    # 2. Khởi chạy biểu tượng Khay hệ thống (System Tray)
+    # 2. Khởi chạy biểu tượng Khay hệ thống (System Tray) và Phím tắt toàn cục (Global Hotkey)
     tray = SystemTrayManager(
         port=active_port,
         session_token=token,
@@ -703,6 +703,10 @@ def run_ui(
         get_current_mode=lambda: router.mode,
     )
     tray.start()
+
+    from assistant.desktop.hotkey import get_hotkey_manager
+    hotkey_mgr = get_hotkey_manager(port=active_port, session_token=token)
+    hotkey_mgr.start()
 
     # 3. Mở cửa sổ giao diện nếu không yêu cầu chạy ngầm (minimized) hoặc no_browser
     if not no_browser and not minimized:
@@ -720,6 +724,7 @@ def run_ui(
         print(f"[LỖI KHỞI ĐỘNG MÁY CHỦ] {err}")
         return 1
     finally:
+        hotkey_mgr.stop()
         tray.stop()
         release_instance(config.data_dir)
 

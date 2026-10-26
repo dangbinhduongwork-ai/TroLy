@@ -265,6 +265,14 @@ function handleServerEvent(type, data) {
             appendErrorMessage(data.error);
             finishCurrentTurn({});
             break;
+
+        case "focus_input":
+            document.querySelector('[data-screen="chat"]')?.click();
+            setTimeout(() => {
+                const input = document.getElementById("user-input");
+                if (input) input.focus();
+            }, 60);
+            break;
     }
 }
 
@@ -849,6 +857,17 @@ async function loadDiagnostics() {
         const autoCheck = document.getElementById("chk-autostart");
         if (autoCheck) autoCheck.checked = Boolean(res.autostart_enabled);
 
+        // 5b. Hotkey checkbox
+        const hotkeyCheck = document.getElementById("chk-hotkey");
+        if (hotkeyCheck) {
+            try {
+                const hotkeyData = await apiFetch("/api/settings/hotkey");
+                hotkeyCheck.checked = Boolean(hotkeyData.enabled);
+            } catch (err) {
+                console.debug("Chưa lấy được trạng thái hotkey:", err);
+            }
+        }
+
         // 6. Workspace path
         const wsEl = document.getElementById("settings-ws-hint");
         if (wsEl) wsEl.innerText = res.workspace_dir || "C:\\AI_Workspace";
@@ -1004,6 +1023,119 @@ async function loadAuditLogs() {
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="5" class="error-state">Lỗi khi tải nhật ký: ${escapeHtml(err.message)}</td></tr>`;
     }
+}
+
+// =============================================================================
+// THÔNG BÁO TOAST & KÉO-THẢ TẬP TIN (DRAG & DROP / FILE UPLOAD)
+// =============================================================================
+
+function showToast(message, type = "info") {
+    let container = document.getElementById("toast-container");
+    if (!container) {
+        container = document.createElement("div");
+        container.id = "toast-container";
+        container.style.cssText = "position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:0.5rem;pointer-events:none;";
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement("div");
+    const bg = type === "error" ? "var(--danger, #ef4444)" : type === "success" ? "var(--success, #10b981)" : "var(--accent, #3b82f6)";
+    toast.style.cssText = `background:${bg};color:#ffffff;padding:0.6rem 1.1rem;border-radius:8px;font-size:0.88rem;box-shadow:0 4px 14px rgba(0,0,0,0.3);transition:all 0.25s ease;pointer-events:auto;max-width:380px;word-break:break-word;display:flex;align-items:center;gap:0.5rem;`;
+    toast.innerText = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(8px)";
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+async function uploadFileToWorkspace(file) {
+    if (!file) return;
+    const maxBytes = 25 * 1024 * 1024;
+    if (file.size > maxBytes) {
+        showToast("Dung lượng tệp vượt quá 25MB: " + file.name, "error");
+        return;
+    }
+
+    showToast(`Đang tải tệp "${file.name}" lên Workspace...`, "info");
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        const token = state.token || localStorage.getItem("troly_session_token") || "";
+        const url = `/api/upload-file?token=${encodeURIComponent(token)}`;
+        const resp = await fetch(url, {
+            method: "POST",
+            headers: {
+                "X-Session-Token": token,
+            },
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            const errJson = await resp.json().catch(() => ({}));
+            throw new Error(errJson.detail || "Không thể tải lên tệp.");
+        }
+
+        const data = await resp.json();
+        showToast(`✅ Đã tải lên "${data.filename}" thành công!`, "success");
+
+        // Chuyển sang màn hình chat và tự động điền câu lệnh vào khung chat
+        document.querySelector('[data-screen="chat"]')?.click();
+        const textarea = document.getElementById("user-input");
+        if (textarea) {
+            textarea.value = `Hãy tóm tắt và phân tích nội dung file: ${data.filename}`;
+            textarea.style.height = "auto";
+            textarea.style.height = Math.min(textarea.scrollHeight, 180) + "px";
+            textarea.focus();
+        }
+    } catch (err) {
+        showToast("Lỗi tải tệp: " + err.message, "error");
+    }
+}
+
+function initDragAndDrop() {
+    const dropzone = document.getElementById("dropzone-overlay");
+    let dragCounter = 0;
+
+    window.addEventListener("dragenter", (e) => {
+        if (e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files")) {
+            e.preventDefault();
+            dragCounter++;
+            if (dropzone) dropzone.classList.remove("hidden");
+        }
+    });
+
+    window.addEventListener("dragover", (e) => {
+        if (e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files")) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+        }
+    });
+
+    window.addEventListener("dragleave", (e) => {
+        if (e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files")) {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                if (dropzone) dropzone.classList.add("hidden");
+            }
+        }
+    });
+
+    window.addEventListener("drop", async (e) => {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            e.preventDefault();
+            dragCounter = 0;
+            if (dropzone) dropzone.classList.add("hidden");
+
+            const files = Array.from(e.dataTransfer.files);
+            for (const file of files) {
+                await uploadFileToWorkspace(file);
+            }
+        }
+    });
 }
 
 // =============================================================================
@@ -1201,6 +1333,34 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         };
     }
+
+    const chkHotkey = document.getElementById("chk-hotkey");
+    if (chkHotkey) {
+        chkHotkey.onchange = async (e) => {
+            try {
+                await apiFetch("/api/settings/hotkey", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: e.target.checked }),
+                });
+                showToast(e.target.checked ? "✅ Đã bật phím tắt Ctrl+Shift+Space" : "ℹ️ Đã tắt phím tắt toàn cục", "info");
+                loadDiagnostics();
+            } catch (err) {
+                alert("Lỗi đổi cài đặt phím tắt: " + err.message);
+            }
+        };
+    }
+
+    // Tự động focus ô chat khi cửa sổ Trợ lý được kích hoạt (Spotlight Mode)
+    window.addEventListener("focus", () => {
+        if (state.currentScreen === "chat") {
+            const input = document.getElementById("user-input");
+            if (input) input.focus();
+        }
+    });
+
+    // Kích hoạt tính năng kéo-thả tệp tin
+    initDragAndDrop();
 
     // 9. Tải trạng thái và nạp dữ liệu ban đầu
     try {

@@ -12,12 +12,22 @@ from assistant.desktop.single_instance import (
     get_instance_info,
     release_instance,
 )
+from assistant.desktop.hotkey import GlobalHotkeyManager, get_hotkey_manager
 from assistant.desktop.tray import SystemTrayManager, create_tray_image
-from assistant.desktop.window import find_edge_executable, launch_desktop_window
+from assistant.desktop.window import (
+    activate_spotlight_mode,
+    bring_window_to_front,
+    find_assistant_window,
+    find_edge_executable,
+    launch_desktop_window,
+)
 
 __all__ = [
     "find_edge_executable",
     "launch_desktop_window",
+    "find_assistant_window",
+    "bring_window_to_front",
+    "activate_spotlight_mode",
     "create_tray_image",
     "SystemTrayManager",
     "is_autostart_enabled",
@@ -28,4 +38,6 @@ __all__ = [
     "check_or_acquire_instance",
     "get_instance_info",
     "release_instance",
+    "GlobalHotkeyManager",
+    "get_hotkey_manager",
 ]

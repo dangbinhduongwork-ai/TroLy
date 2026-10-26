@@ -32,6 +32,21 @@ from assistant.tools.registry import default_tool_registry
 
 logger = logging.getLogger("assistant.server.ws")
 
+_global_ws_manager: Any = None
+
+
+def notify_focus_input() -> None:
+    """Gọi từ luồng bất kỳ để thông báo cho Web UI đặt con trỏ vào ô nhập chat."""
+    global _global_ws_manager
+    if _global_ws_manager and getattr(_global_ws_manager, "active_websockets", None):
+        try:
+            # Tìm loop hiện tại hoặc chạy coroutine threadsafe
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.run_coroutine_threadsafe(_global_ws_manager.broadcast_focus_input(), loop)
+        except Exception as exc:
+            logger.debug("Không thể phát sự kiện focus_input: %s", exc)
+
 
 class ChatWebSocketManager:
     """Quản lý các kết nối WebSocket và điều phối hội thoại tương tác."""
@@ -51,7 +66,22 @@ class ChatWebSocketManager:
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         # Task đang chạy của mỗi kết nối WebSocket
         self.active_tasks: dict[WebSocket, asyncio.Task[Any]] = {}
+        # Danh sách kết nối WebSocket đang hoạt động
+        self.active_websockets: set[WebSocket] = set()
 
+        global _global_ws_manager
+        _global_ws_manager = self
+
+    async def broadcast_focus_input(self) -> None:
+        """Gửi sự kiện yêu cầu giao diện Web đặt con trỏ vào ô nhập chat (Spotlight Mode)."""
+        dead: list[WebSocket] = []
+        for ws in list(self.active_websockets):
+            try:
+                await self._send_event(ws, "focus_input", {})
+            except Exception:
+                dead.append(ws)
+        for d in dead:
+            self.active_websockets.discard(d)
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         """Xử lý vòng đời của một kết nối WebSocket."""
@@ -63,6 +93,7 @@ class ChatWebSocketManager:
             return
 
         await websocket.accept()
+        self.active_websockets.add(websocket)
         logger.info("Client đã kết nối thành công tới WebSocket /ws/chat")
 
         try:
@@ -144,6 +175,7 @@ class ChatWebSocketManager:
         except Exception as err:
             logger.error("Lỗi phiên WebSocket: %s", err)
         finally:
+            self.active_websockets.discard(websocket)
             if websocket in self.active_tasks:
                 task = self.active_tasks.pop(websocket)
                 if not task.done():

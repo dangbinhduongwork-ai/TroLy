@@ -139,6 +139,15 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- DROPZONE OVERLAY CHO KÉO-THẢ TỆP TIN -->
+                <div class="dropzone-overlay hidden" id="dropzone-overlay">
+                    <div class="dropzone-card">
+                        <div class="dropzone-icon">📥</div>
+                        <div class="dropzone-text">Thả tệp tin vào đây để tải lên Workspace</div>
+                        <div class="dropzone-hint">Hỗ trợ PDF, Word (.docx), Excel (.xlsx), Text, Code (Tối đa 25MB)</div>
+                    </div>
+                </div>
             </section>
 
             <!-- 2. MÀN HÌNH TRÍ NHỚ DÀI HẠN (MEMORIES) -->
@@ -300,6 +309,17 @@
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="chk-autostart">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <label class="setting-name">Phím tắt toàn cục (Global Hotkey):</label>
+                                    <span class="setting-hint">Nhấn <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> ở bất kỳ đâu để gọi Trợ lý nổi lên trên cùng (Spotlight Mode)</span>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="chk-hotkey">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>

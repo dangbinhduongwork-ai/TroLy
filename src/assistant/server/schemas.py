@@ -186,6 +186,22 @@ class AutostartUpdateRequest(BaseModel):
     enabled: bool = Field(description="Bật hoặc tắt tự khởi động cùng Windows")
 
 
+class HotkeyUpdateRequest(BaseModel):
+    """Yêu cầu bật/tắt phím tắt toàn cục Spotlight Mode."""
+
+    enabled: bool = Field(description="Bật hoặc tắt phím tắt toàn cục")
+
+
+class FileUploadResponse(BaseModel):
+    """Kết quả tải tệp tin lên Workspace an toàn."""
+
+    ok: bool
+    filename: str
+    path: str
+    size: int
+    message: str
+
+
 class DiagnosticsResponse(BaseModel):
     """Kết quả chẩn đoán toàn diện hệ thống phục vụ trang Cài đặt & Chẩn đoán."""
 

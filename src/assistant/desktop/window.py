@@ -73,3 +73,93 @@ def launch_desktop_window(
     except Exception as err:
         logger.error("Lỗi khi mở trình duyệt: %s", err)
         return False
+
+
+def find_assistant_window() -> int | None:
+    """Tìm handle (HWND) của cửa sổ giao diện Trợ Lý AI đang chạy trên Windows."""
+    import sys
+    if sys.platform != "win32":
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        found_hwnd: int | None = None
+
+        def enum_proc(hwnd: int, lparam: int) -> bool:
+            nonlocal found_hwnd
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buff = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buff, length + 1)
+                title = buff.value
+                # So khớp các tiêu đề có thể của cửa sổ giao diện
+                if (
+                    "Trợ Lý AI" in title
+                    or "Tro Ly" in title
+                    or "AIAssistant" in title
+                    or "127.0.0.1:" in title
+                ):
+                    found_hwnd = hwnd
+                    return False  # Dừng quét khi tìm thấy
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows(WNDENUMPROC(enum_proc), 0)
+        return found_hwnd
+    except Exception as exc:
+        logger.debug("Lỗi tìm kiếm cửa sổ Trợ Lý: %s", exc)
+        return None
+
+
+def bring_window_to_front(hwnd: int) -> bool:
+    """Kích hoạt và đưa cửa sổ chỉ định lên vị trí trên cùng (Bring to Front)."""
+    import sys
+    if sys.platform != "win32" or not hwnd:
+        return False
+
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        if not user32.IsWindow(hwnd):
+            return False
+
+        # Nếu đang minimize thì khôi phục lại (SW_RESTORE = 9), nếu không thì hiển thị (SW_SHOW = 5)
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)
+        else:
+            user32.ShowWindow(hwnd, 5)
+
+        # Gắn thread input để vượt qua cơ chế chặn SetForegroundWindow của Windows
+        fore_hwnd = user32.GetForegroundWindow()
+        fore_thread = user32.GetWindowThreadProcessId(fore_hwnd, None)
+        cur_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+
+        if fore_thread != cur_thread:
+            user32.AttachThreadInput(fore_thread, cur_thread, True)
+            user32.SetForegroundWindow(hwnd)
+            user32.SetFocus(hwnd)
+            user32.AttachThreadInput(fore_thread, cur_thread, False)
+        else:
+            user32.SetForegroundWindow(hwnd)
+            user32.SetFocus(hwnd)
+        return True
+    except Exception as exc:
+        logger.debug("Lỗi đưa cửa sổ lên trên cùng: %s", exc)
+        return False
+
+
+def activate_spotlight_mode(port: int, session_token: str) -> bool:
+    """Kích hoạt Spotlight Mode: Đưa cửa sổ lên trên cùng hoặc mở mới nếu chưa có."""
+    hwnd = find_assistant_window()
+    if hwnd:
+        logger.info("Tìm thấy cửa sổ Trợ Lý (HWND: %s), đang đưa lên trên cùng...", hwnd)
+        return bring_window_to_front(hwnd)
+
+    logger.info("Chưa tìm thấy cửa sổ mở sẵn, đang khởi chạy cửa sổ mới...")
+    return launch_desktop_window(port=port, session_token=session_token)
