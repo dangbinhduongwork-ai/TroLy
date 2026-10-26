@@ -107,6 +107,58 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   - `python-docx>=1.1.0`: Đọc và tạo tài liệu Word (.docx).
   - `openpyxl>=3.1.0`: Đọc và tạo bảng tính Excel (.xlsx).
 
+### [2026-10-26] Giai đoạn 6: Backend Server (FastAPI + WebSocket) và Giao Diện Desktop (Offline Web UI)
+- **Bối cảnh**: Cần chuyển đổi toàn bộ trải nghiệm từ terminal lên giao diện đồ họa đẹp, nhẹ, phản hồi streaming mượt mà theo thời gian thực, có cơ chế duyệt quyền bất đồng bộ (Approval Modal) khi gặp thao tác `CONFIRM`, và chạy được hoàn toàn ngoại tuyến không phụ thuộc internet hay CDN bên ngoài.
+- **Phương án đã chọn**:
+  1. **Khung máy chủ FastAPI + Uvicorn + WebSockets**:
+     - Lựa chọn `FastAPI` và `Uvicorn` vì hiệu năng bất đồng bộ (asyncio) vượt trội, tích hợp sẵn Pydantic validation và hỗ trợ song song cả REST API lẫn WebSocket trên cùng một cổng.
+     - Server chỉ lắng nghe trên `127.0.0.1` (localhost) tại cổng `ui_port` cấu hình trong `settings.toml`.
+  2. **Bảo vệ an toàn bằng Session Token cục bộ**:
+     - Tự động sinh `Session Token` ngẫu nhiên bảo mật cao qua `secrets.token_urlsafe(32)` khi khởi động máy chủ.
+     - Xác thực token trên mọi yêu cầu REST (`X-Session-Token` hoặc query parameter) và WebSocket handshake (`/ws/chat?token=...`).
+     - Ngăn chặn triệt để các trang web độc hại từ trình duyệt của người dùng khai thác API nội bộ (chống CSRF / SSRF cục bộ).
+  3. **Cơ chế duyệt quyền bất đồng bộ qua WebSocket (Approval Flow)**:
+     - Khi `AgentLoop` gặp công cụ mức `CONFIRM`, server sinh `request_id`, tạo `asyncio.Future` và phát sự kiện `approval_required` xuống UI.
+     - Hộp thoại Approval Modal nổi lên giao diện với cảnh báo chi tiết và đồng hồ đếm ngược 120s.
+     - Khi người dùng bấm "Cho phép" hoặc "Từ chối", client gửi sự kiện `approval_response` để mở khoá Future và tiếp tục hoặc dừng vòng lặp thực thi.
+  4. **Giao diện Desktop ngoại tuyến 100% không dùng CDN**:
+     - Toàn bộ HTML, CSS và JavaScript được lưu trữ cục bộ trong `src/assistant/ui_static/`.
+     - Tuyệt đối không tải bất kỳ script, stylesheet hoặc font nào từ internet; sử dụng hệ thống font có sẵn trên Windows (`Segoe UI`, `Cascadia Code`).
+     - Tự xây dựng bộ phân tích Markdown thuần bằng regex trong `app.js` có escape HTML chống XSS, hỗ trợ Dark/Light mode, xem sửa Trí nhớ và Nhắc việc.
+  5. **Khởi chạy cửa sổ ứng dụng Microsoft Edge độc lập**:
+     - Module `desktop/window.py` tự động phát hiện `msedge.exe` trên hệ thống và khởi chạy với tham số `--app=http://127.0.0.1:<port>/?token=<token>` (cửa sổ ứng dụng độc lập, không thanh địa chỉ).
+     - Tuân thủ nghiêm ngặt Nguyên tắc 4: Tuyệt đối không dùng `shell=True`, gọi `subprocess.Popen` với mảng tham số (`list`). Tự động fallback sang trình duyệt mặc định nếu không có Edge.
+  6. **Lệnh CLI `assistant ui` và thiết lập mặc định**:
+     - Bổ sung lệnh `assistant ui` và đặt làm hành vi mặc định khi gõ `assistant` không kèm tham số.
+- **Lý do**: Đảm bảo tốc độ khởi động nhanh, bảo mật tuyệt đối cho máy trạm Windows, giao diện người dùng hiện đại và hoạt động mượt mà kể cả khi ngắt kết nối mạng.
+- **Thư viện mới**:
+  - `fastapi>=0.110.0`: Khung làm việc API REST và WebSocket bất đồng bộ.
+  - `uvicorn[standard]>=0.28.0`: Máy chủ ASGI chạy ứng dụng FastAPI trên localhost.
+  - `websockets>=12.0`: Xử lý giao thức WebSocket thời gian thực.
+
+### [2026-10-26] Giai đoạn 7: Khay Hệ Thống (System Tray) và Tự Khởi Động Cùng Windows (Autostart)
+- **Bối cảnh**: Cần giúp Trợ lý chạy ngầm nhẹ nhàng ở khay hệ thống, không chiếm chỗ trên Taskbar sau khi đóng cửa sổ, tự khởi động cùng Windows mà không hỏi quyền Admin (UAC), và ngăn chặn việc mở nhiều tiến trình trùng lặp (Single Instance).
+- **Phương án đã chọn**:
+  1. **Khay hệ thống `pystray>=0.19.5` và đồ họa `Pillow>=10.2.0`**:
+     - Lựa chọn `pystray` vì hoạt động tin cậy và native trên Windows Taskbar notification area.
+     - Sử dụng `Pillow` để vẽ icon động 64x64 trong bộ nhớ (không cần file ảnh tĩnh bên ngoài). Tự động cập nhật chấm trạng thái: 🟢 Online (Gemini) / 🟡 Offline (Ollama).
+     - Menu chuột phải 100% bằng tiếng Việt với các chức năng thiết yếu: Mở cửa sổ, Đổi model, Khởi động cùng Windows, Mở Workspace, Thoát hoàn toàn.
+  2. **Tự khởi động cùng Windows không cần quyền Admin (`desktop/autostart.py`)**:
+     - Sử dụng module chuẩn `winreg` của Python can thiệp vào `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`.
+     - Tuyệt đối tuân thủ Nguyên tắc 2: Chỉ ghi vào Registry của người dùng hiện tại (HKCU), hoàn toàn không yêu cầu quyền Quản trị viên (Admin / UAC).
+     - Dùng `pythonw.exe` và cờ `--minimized` để khi Windows khởi động máy, Trợ lý chỉ chạy ngầm ở khay hệ thống mà không tự bung cửa sổ giao diện hay hiện màn hình console đen làm phiền người dùng.
+  3. **Khóa tiến trình duy nhất (`desktop/single_instance.py`)**:
+     - Quản lý tệp `data_dir/instance.json` ghi PID, cổng và session token.
+     - Khi người dùng mở app lần thứ hai trong lúc app đang chạy ngầm, hệ thống phát hiện instance cũ đang sống, tự động gọi kích hoạt lại cửa sổ Edge cho instance cũ và thoát nhẹ nhàng tiến trình mới.
+  4. **Cập nhật lệnh `assistant doctor`**:
+     - Bổ sung chẩn đoán trạng thái Autostart, Khay hệ thống và Single Instance.
+- **Lý do**: Tối ưu trải nghiệm sử dụng hàng ngày trên Windows, đảm bảo tính năng nhắc việc luôn chạy đúng giờ mà không làm người dùng cảm thấy bị vướng víu trên màn hình.
+- **Thư viện mới**:
+  - `pystray>=0.19.5`: Điều khiển biểu tượng khay hệ thống trên Windows.
+  - `Pillow>=10.2.0`: Tự sinh ảnh biểu tượng icon động trong bộ nhớ.
+
+
+
 
 
 

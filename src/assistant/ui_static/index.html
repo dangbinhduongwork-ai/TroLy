@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trợ Lý AI - Windows</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dark-theme">
+    <div class="app-layout">
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="brand-icon">🤖</div>
+                    <div class="brand-text">
+                        <h1>Trợ Lý AI</h1>
+                        <span class="status-badge" id="app-status-badge">
+                            <span class="status-dot online" id="status-dot"></span>
+                            <span id="status-text">Đang sẵn sàng</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <button class="nav-item active" data-screen="chat">
+                    <span class="nav-icon">💬</span>
+                    <span class="nav-label">Trò chuyện</span>
+                </button>
+                <button class="nav-item" data-screen="memories">
+                    <span class="nav-icon">🧠</span>
+                    <span class="nav-label">Trí nhớ dài hạn</span>
+                </button>
+                <button class="nav-item" data-screen="reminders">
+                    <span class="nav-icon">⏰</span>
+                    <span class="nav-label">Nhắc việc</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="workspace-info" id="workspace-info" title="Thư mục làm việc">
+                    <span class="ws-icon">📁</span>
+                    <span class="ws-path" id="ws-path-text">Workspace</span>
+                </div>
+                <div class="footer-actions">
+                    <button class="theme-toggle" id="theme-toggle" title="Đổi giao diện Sáng / Tối">
+                        <span id="theme-icon">🌙</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-content">
+            <!-- 1. MÀN HÌNH TRÒ CHUYỆN (CHAT) -->
+            <section class="screen-view active" id="screen-chat">
+                <header class="chat-header">
+                    <div class="chat-header-left">
+                        <button class="btn btn-outline btn-sm" id="btn-new-chat">
+                            <span>➕</span> Cuộc trò chuyện mới
+                        </button>
+                        <select class="select-conversations" id="select-conversations">
+                            <option value="">(Chọn cuộc trò chuyện)</option>
+                        </select>
+                    </div>
+
+                    <div class="chat-header-right">
+                        <!-- Chọn chế độ model -->
+                        <div class="model-mode-selector">
+                            <label for="select-model-mode">Mô hình:</label>
+                            <select id="select-model-mode" class="select-sm">
+                                <option value="auto">Tự động (Auto)</option>
+                                <option value="gemini">Gemini Cloud</option>
+                                <option value="local">Ollama Cục bộ</option>
+                            </select>
+                        </div>
+
+                        <!-- Gạt chế độ nhạy cảm -->
+                        <label class="toggle-switch" title="Chế độ nhạy cảm: Tuyệt đối không gửi dữ liệu ra mạng ngoài, chỉ xử lý cục bộ qua Ollama">
+                            <input type="checkbox" id="chk-sensitive">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">🔒 Nhạy cảm</span>
+                        </label>
+                    </div>
+                </header>
+
+                <div class="chat-messages" id="chat-messages">
+                    <!-- Tin nhắn chào mừng mặc định -->
+                    <div class="message-row assistant">
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-bubble">
+                            <div class="message-text">
+                                Xin chào! Tôi là <strong>Trợ Lý AI</strong> trên Windows. Tôi có thể giúp bạn:
+                                <ul>
+                                    <li>📁 <strong>Quản lý file & thư mục:</strong> tạo, đọc, sửa, sắp xếp thông minh.</li>
+                                    <li>📄 <strong>Tài liệu văn phòng:</strong> đọc/tạo PDF, Word (.docx), Excel (.xlsx).</li>
+                                    <li>🌐 <strong>Tra cứu web:</strong> tổng hợp thông tin với chế độ bảo mật chống SSRF.</li>
+                                    <li>⏰ <strong>Nhắc việc đúng giờ:</strong> báo thức, hoãn nhắc và phát thông báo Windows Toast.</li>
+                                    <li>🧠 <strong>Ghi nhớ dữ kiện:</strong> sở thích, quy tắc đặt tên, dự án của bạn qua các phiên.</li>
+                                </ul>
+                                Hãy nhập câu hỏi hoặc yêu cầu bằng tiếng Việt bên dưới để bắt đầu!
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- THANH NHẬP LIỆU -->
+                <div class="chat-input-bar">
+                    <div class="input-container">
+                        <textarea
+                            id="user-input"
+                            class="chat-textarea"
+                            rows="1"
+                            placeholder="Nhập yêu cầu bằng tiếng Việt... (Enter để gửi, Shift+Enter xuống dòng)"
+                        ></textarea>
+                        <div class="input-actions">
+                            <button class="btn btn-danger btn-sm hidden" id="btn-cancel" title="Dừng sinh câu trả lời">
+                                ⏹️ Dừng lại
+                            </button>
+                            <button class="btn btn-primary" id="btn-send" title="Gửi tin nhắn">
+                                <span>Gửi</span> 🚀
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. MÀN HÌNH TRÍ NHỚ DÀI HẠN (MEMORIES) -->
+            <section class="screen-view" id="screen-memories">
+                <header class="section-header">
+                    <div class="section-title">
+                        <h2>🧠 Trí Nhớ Dài Hạn Cục Bộ</h2>
+                        <p class="section-desc">Những thông tin và quy tắc mà Trợ lý đã ghi nhớ về bạn.</p>
+                    </div>
+                    <div class="section-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-add-memory">
+                            ➕ Thêm trí nhớ
+                        </button>
+                    </div>
+                </header>
+
+                <div class="filter-bar">
+                    <input
+                        type="text"
+                        id="search-memory"
+                        class="search-input"
+                        placeholder="🔍 Tìm kiếm trí nhớ (FTS5 tiếng Việt)..."
+                    >
+                    <select id="filter-memory-category" class="select-sm">
+                        <option value="">Tất cả danh mục</option>
+                        <option value="preference">Sở thích (Preference)</option>
+                        <option value="project">Dự án (Project)</option>
+                        <option value="naming_rule">Quy tắc đặt tên (Naming Rule)</option>
+                        <option value="general">Chung (General)</option>
+                    </select>
+                </div>
+
+                <div class="memory-grid" id="memory-grid">
+                    <!-- Danh sách thẻ trí nhớ sẽ được render qua JS -->
+                </div>
+            </section>
+
+            <!-- 3. MÀN HÌNH NHẮC VIỆC (REMINDERS) -->
+            <section class="screen-view" id="screen-reminders">
+                <header class="section-header">
+                    <div class="section-title">
+                        <h2>⏰ Lịch Nhắc Việc Đúng Giờ</h2>
+                        <p class="section-desc">Lập lịch trình thông báo Windows Toast chạy nền không phụ thuộc internet.</p>
+                    </div>
+                    <div class="section-actions">
+                        <button class="btn btn-outline btn-sm" id="btn-morning-briefing">
+                            🌅 Bản tin sáng
+                        </button>
+                        <button class="btn btn-primary btn-sm" id="btn-add-reminder">
+                            ➕ Đặt lịch nhắc mới
+                        </button>
+                    </div>
+                </header>
+
+                <div class="reminders-container">
+                    <div class="reminders-column">
+                        <h3>📌 Lời Nhắc Sắp Tới (Upcoming)</h3>
+                        <div class="reminder-list" id="upcoming-reminders-list">
+                            <!-- Render upcoming qua JS -->
+                        </div>
+                    </div>
+
+                    <div class="reminders-column">
+                        <h3>⚠️ Lời Nhắc Bị Bỏ Lỡ (Missed)</h3>
+                        <div class="reminder-list" id="missed-reminders-list">
+                            <!-- Render missed qua JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- HỘP THOẠI PHÊ DUYỆT TÁC VỤ (APPROVAL MODAL) -->
+    <div class="modal-overlay hidden" id="approval-modal">
+        <div class="modal-card">
+            <div class="modal-header warning">
+                <span class="modal-icon">⚠️</span>
+                <h3>YÊU CẦU PHÊ DUYỆT TÁC VỤ AN TOÀN</h3>
+            </div>
+            <div class="modal-body">
+                <p class="approval-desc">Trợ lý AI đang yêu cầu thực hiện một thao tác ở mức <strong>CONFIRM</strong>:</p>
+                <div class="approval-info-box">
+                    <div class="info-row">
+                        <span class="info-label">Công cụ:</span>
+                        <code class="info-value" id="approval-tool-name">-</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Lý do:</span>
+                        <span class="info-value reason" id="approval-reason">-</span>
+                    </div>
+                    <div class="info-row params">
+                        <span class="info-label">Tham số / Lệnh:</span>
+                        <pre class="code-box" id="approval-args">-</pre>
+                    </div>
+                </div>
+                <p class="approval-countdown">
+                    ⏱️ Tự động từ chối sau: <strong id="approval-timer">120</strong>s
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="btn-deny-approval">
+                    ❌ Từ chối
+                </button>
+                <button class="btn btn-success" id="btn-approve-approval">
+                    ✅ Cho phép thực hiện
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL THÊM/SỬA TRÍ NHỚ -->
+    <div class="modal-overlay hidden" id="memory-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="memory-modal-title">Thêm Trí Nhớ Mới</h3>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-memory-id">
+                <div class="form-group">
+                    <label for="input-memory-cat">Danh mục:</label>
+                    <select id="input-memory-cat" class="form-control">
+                        <option value="preference">Sở thích (Preference)</option>
+                        <option value="project">Dự án (Project)</option>
+                        <option value="naming_rule">Quy tắc đặt tên (Naming Rule)</option>
+                        <option value="general">Chung (General)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="input-memory-content">Nội dung dữ kiện:</label>
+                    <textarea id="input-memory-content" class="form-control" rows="4" placeholder="Ví dụ: Tôi thích lưu file mã nguồn vào thư mục scripts/"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="btn-cancel-memory">Huỷ</button>
+                <button class="btn btn-primary" id="btn-save-memory">Lưu lại</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL TẠO LỜI NHẮC -->
+    <div class="modal-overlay hidden" id="reminder-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Đặt Lời Nhắc Việc Mới</h3>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="input-reminder-message">Nội dung nhắc việc:</label>
+                    <input type="text" id="input-reminder-message" class="form-control" placeholder="Ví dụ: Gửi báo cáo doanh thu tuần cho sếp">
+                </div>
+                <div class="form-group">
+                    <label for="input-reminder-time">Thời gian kích hoạt:</label>
+                    <input type="datetime-local" id="input-reminder-time" class="form-control">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="btn-cancel-reminder">Huỷ</button>
+                <button class="btn btn-primary" id="btn-save-reminder">Tạo lời nhắc</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

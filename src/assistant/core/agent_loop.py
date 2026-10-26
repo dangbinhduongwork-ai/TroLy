@@ -15,6 +15,7 @@ Quy trình:
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+import inspect
 import json
 from typing import Any
 
@@ -73,10 +74,17 @@ class AgentLoop:
         context: ConversationContext,
         system_prompt: str,
         is_sensitive: bool = False,
+        on_event: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Thực thi một lượt trao đổi gồm nhiều bước gọi công cụ."""
         self.security_tracker.reset()
         tool_call_history: list[tuple[str, str]] = []
+
+        async def _emit(evt_name: str, payload: dict[str, Any]) -> None:
+            if on_event is not None:
+                r = on_event(evt_name, payload)
+                if inspect.isawaitable(r):
+                    await r
 
         for step in range(self.max_steps):
             step_text_chunks: list[str] = []
@@ -95,6 +103,7 @@ class AgentLoop:
                 if event.type == "text_delta":
                     if isinstance(event.content, str):
                         step_text_chunks.append(event.content)
+                        await _emit("text_delta", {"content": event.content})
                     yield event
                 elif event.type == "tool_call":
                     if isinstance(event.content, ToolCall):
@@ -107,6 +116,8 @@ class AgentLoop:
                 full_text = "".join(step_text_chunks)
                 if full_text.strip():
                     context.add_assistant_message(full_text)
+                unique_tools = list(dict.fromkeys(s[0] for s in tool_call_history))
+                await _emit("turn_done", {"tools_called": unique_tools})
                 return
 
             # 3. Model yêu cầu gọi một hoặc nhiều công cụ
@@ -184,8 +195,16 @@ class AgentLoop:
 
                 decision_log = "ALLOW"
                 if decision == PermissionDecision.NEEDS_APPROVAL:
-                    # Chờ phê duyệt từ người dùng
-                    approved = self.approval_callback(tc.name, tc.arguments, reason)
+                    # Chờ phê duyệt từ người dùng (hỗ trợ cả sync và async approval_callback)
+                    if inspect.iscoroutinefunction(self.approval_callback):
+                        approved = await self.approval_callback(tc.name, tc.arguments, reason)
+                    else:
+                        cb_res = self.approval_callback(tc.name, tc.arguments, reason)
+                        if inspect.isawaitable(cb_res):
+                            approved = await cb_res
+                        else:
+                            approved = cb_res
+
                     if not approved:
                         reject_summary = "[NGƯỜI DÙNG TỪ CHỐI DUYỆT TÁC VỤ]"
                         self.audit_logger.log_call(
@@ -206,6 +225,7 @@ class AgentLoop:
                     decision_log = "APPROVED"
 
                 # e) Thực thi công cụ
+                await _emit("tool_start", {"tool_name": tc.name, "arguments": tc.arguments})
                 yield StreamEvent(type="text_delta", content=f"\n[Đang chạy: {tc.name}...] ")
                 execution_res = tool_def.execute(**tc.arguments)
 
@@ -228,6 +248,14 @@ class AgentLoop:
                     is_error=not is_ok,
                 )
 
+                await _emit(
+                    "tool_result",
+                    {
+                        "tool_name": tc.name,
+                        "result": str(raw_data)[:500],
+                        "is_error": not is_ok,
+                    },
+                )
                 yield StreamEvent(type="text_delta", content="Xong.\n")
 
                 # h) Lưu kết quả vào ngữ cảnh để gửi lại cho Model
@@ -235,6 +263,8 @@ class AgentLoop:
                     Message(role="tool", content=tool_content, tool_call_id=tc.id)
                 )
 
+        unique_tools = list(dict.fromkeys(s[0] for s in tool_call_history))
+        await _emit("turn_done", {"tools_called": unique_tools})
         yield StreamEvent(
             type="text_delta",
             content="\n[CẢNH BÁO] Đã đạt giới hạn tối đa 10 bước công cụ trong một lượt.\n",

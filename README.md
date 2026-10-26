@@ -145,7 +145,51 @@ Thử nghiệm xử lý tài liệu văn phòng và phân loại dọn dẹp th�
 
 ---
 
-### Bước 11: Kiểm định khả năng gọi công cụ của Model
+### Bước 11: Khởi Động Giao Diện Ứng Dụng Desktop (FastAPI + Edge App Mode)
+Khởi động máy chủ backend và mở cửa sổ ứng dụng riêng biệt:
+```powershell
+# Cách 1: Gõ lệnh mặc định
+assistant
+
+# Hoặc gõ tường minh:
+assistant ui
+
+# Nếu chỉ muốn chạy backend không mở trình duyệt tự động:
+assistant ui --no-browser
+```
+1. Cửa sổ Microsoft Edge độc lập tự động mở tại `http://127.0.0.1:8000/?token=<session_token>` (không có thanh địa chỉ trình duyệt).
+2. Trò chuyện streaming thời gian thực, định dạng markdown và khối mã cascadia code.
+3. Khi AI thực hiện thao tác mức `CONFIRM` (xoá file, ghi đè, chạy lệnh), **Hộp thoại Duyệt quyền (Approval Modal)** sẽ nổi lên hỏi xác nhận trực tiếp.
+4. Xem, tìm kiếm và chỉnh sửa Trí nhớ dài hạn (`/api/memories`).
+5. Quản lý, hoãn nhắc và nhận thông báo Lời nhắc việc (`/api/reminders`).
+6. Chạy kịch bản kiểm thử toàn diện luồng Server & WebSocket:
+   ```powershell
+   python scripts/test_server_flow.py
+   ```
+
+---
+
+### Bước 12: Khay Hệ Thống và Tự Khởi Động Cùng Windows (System Tray & Autostart)
+1. Khi ứng dụng chạy, một biểu tượng icon hiện đại tự vẽ bằng Pillow sẽ xuất hiện ở góc dưới bên phải màn hình (System Tray).
+2. Khi đóng cửa sổ giao diện Edge (nút X), ứng dụng vẫn chạy ngầm ở khay hệ thống để đảm bảo bộ nhắc việc nổ thông báo đúng giờ.
+3. Nhấp đúp hoặc nhấp chuột phải vào icon khay hệ thống để:
+   - 💬 **Mở cửa sổ Trợ lý**: Kích hoạt lại cửa sổ giao diện Edge.
+   - 🤖 **Chế độ Model**: Chuyển nhanh giữa Tự động / Gemini Cloud / Ollama Cục bộ.
+   - 🔄 **Khởi động cùng Windows**: Bật/tắt tự động khởi động cùng Windows (lưu vào Registry HKCU, không cần quyền Admin).
+   - 📁 **Mở thư mục làm việc (Workspace)**: Mở nhanh trong Windows File Explorer.
+   - 🚪 **Thoát hoàn toàn**: Tắt sạch tiến trình ngầm và giải phóng tài nguyên.
+4. Chạy chế độ ngầm hoàn toàn (không tự bung cửa sổ):
+   ```powershell
+   assistant ui --minimized
+   ```
+5. Chạy kịch bản kiểm thử toàn diện luồng Khay hệ thống & Autostart:
+   ```powershell
+   python scripts/test_tray_flow.py
+   ```
+
+---
+
+### Bước 13: Kiểm định khả năng gọi công cụ của Model
 Chạy script kiểm tra xem mô hình có gọi đúng công cụ tạo file hay không:
 ```powershell
 python scripts/check_tool_calling.py --model qwen2.5:7b
@@ -154,10 +198,15 @@ python scripts/check_tool_calling.py --model gemini-2.5-flash --provider gemini
 
 ---
 
-### Bước 12: Chạy kiểm thử tự động và kiểm tra mã sạch
-Chạy bộ unit test toàn diện:
+### Bước 14: Chạy kiểm thử tự động và kiểm tra mã sạch
+Chạy toàn bộ unit tests:
 ```powershell
 pytest -v
+```
+
+Chạy riêng bộ kiểm thử Khay hệ thống & Autostart:
+```powershell
+pytest tests/test_tray_autostart.py -v
 ```
 
 Kiểm tra cú pháp linter bằng `ruff`:

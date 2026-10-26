@@ -25,7 +25,7 @@ git add .
 
 :: 4. Commit mã nguồn
 echo [4/5] Tạo commit mã nguồn...
-git commit -m "feat(agents): implement document tools, SSRF defense, directory organizer, and specialized agents for phase 5" || git commit -m "feat: phase 5 agents"
+git commit -m "feat(desktop): implement system tray, autostart via HKCU, and single instance lock for phase 7" || git commit -m "feat: phase 7 system tray and autostart"
 
 
 

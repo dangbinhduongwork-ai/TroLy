@@ -140,6 +140,34 @@ def run_doctor() -> int:
     edge_status = check_edge_browser()
     print(f"6. Trình duyệt MS Edge      : {edge_status}")
 
+    try:
+        from assistant.desktop.autostart import is_autostart_enabled
+        autostart_status = "[BẬT]" if is_autostart_enabled() else "[TẮT]"
+    except Exception:
+        autostart_status = "[CHƯA KIỂM TRA ĐƯỢC]"
+    print(f"7. Khởi động cùng Windows   : {autostart_status}")
+
+    try:
+        from assistant.desktop.tray import SystemTrayManager
+        tray_mgr = SystemTrayManager(
+            port=config.ui_port,
+            session_token="",
+            workspace_dir=config.workspace_dir,
+            data_dir=config.data_dir,
+        )
+        tray_status = "[SẴN SÀNG]" if tray_mgr.is_available() else "[THIẾU PYSTRAY/PILLOW]"
+    except Exception:
+        tray_status = "[LỖI NẠP]"
+    print(f"8. Khay hệ thống (Tray)     : {tray_status}")
+
+    try:
+        from assistant.desktop.single_instance import get_instance_info
+        inst_info = get_instance_info(config.data_dir)
+        inst_status = f"[ĐANG CHẠY - PID {inst_info['pid']}]" if inst_info else "[CHƯA CHẠY]"
+    except Exception:
+        inst_status = "[CHƯA RÕ]"
+    print(f"9. Tiến trình Single Instance: {inst_status}")
+
     print("=" * 65)
     print("Chẩn đoán hoàn tất.")
     return 0
@@ -585,6 +613,82 @@ def run_chat() -> int:
         return 1
 
 
+def run_ui(
+    port: int | None = None,
+    no_browser: bool = False,
+    minimized: bool = False,
+) -> int:
+    """Khởi động Uvicorn server, APScheduler, Khay hệ thống và mở giao diện ứng dụng Desktop."""
+    import threading
+    import time
+    import uvicorn
+    from assistant.desktop.single_instance import check_or_acquire_instance, release_instance
+    from assistant.desktop.tray import SystemTrayManager
+    from assistant.desktop.window import launch_desktop_window
+    from assistant.server.app import create_app, get_current_session_token
+
+    config = load_config(create_dirs=True)
+    setup_logging(data_dir=config.data_dir, log_level=config.log_level)
+
+    active_port = port or config.ui_port
+    token = get_current_session_token()
+
+    # 1. Kiểm tra Single Instance Lock
+    is_primary = check_or_acquire_instance(
+        data_dir=config.data_dir,
+        port=active_port,
+        session_token=token,
+        open_window_if_running=not minimized,
+    )
+    if not is_primary:
+        print("=" * 65)
+        print("ℹ️  [THÔNG BÁO] Trợ lý AI đã đang chạy ngầm ở khay hệ thống.")
+        if not minimized:
+            print("   Đã kích hoạt lại cửa sổ ứng dụng giao diện hiện có.")
+        print("=" * 65)
+        return 0
+
+    app = create_app(config=config, session_token=token)
+    router: ModelRouter = app.state.router
+
+    print("=" * 65)
+    print("🤖 TRỢ LÝ AI - KHỞI ĐỘNG GIAO DIỆN ỨNG DỤNG DESKTOP")
+    print(f"Địa chỉ cục bộ : http://127.0.0.1:{active_port}/?token={token}")
+    if minimized:
+        print("Chế độ chạy    : Chạy ngầm ở khay hệ thống (minimized)")
+    print("=" * 65)
+
+    # 2. Khởi chạy biểu tượng Khay hệ thống (System Tray)
+    tray = SystemTrayManager(
+        port=active_port,
+        session_token=token,
+        workspace_dir=config.workspace_dir,
+        data_dir=config.data_dir,
+        on_mode_change=lambda mode: router.set_mode(mode),  # type: ignore
+        get_current_mode=lambda: router.mode,
+    )
+    tray.start()
+
+    # 3. Mở cửa sổ giao diện nếu không yêu cầu chạy ngầm (minimized) hoặc no_browser
+    if not no_browser and not minimized:
+        def _open_window() -> None:
+            time.sleep(1.2)
+            launch_desktop_window(port=active_port, session_token=token)
+
+        threading.Thread(target=_open_window, daemon=True).start()
+
+    try:
+        # Chỉ lắng nghe trên 127.0.0.1 (localhost)
+        uvicorn.run(app, host="127.0.0.1", port=active_port, log_level="warning")
+        return 0
+    except Exception as err:
+        print(f"[LỖI KHỞI ĐỘNG MÁY CHỦ] {err}")
+        return 1
+    finally:
+        tray.stop()
+        release_instance(config.data_dir)
+
+
 def cli() -> None:
     """Hàm điểm đầu (entry point) khi chạy lệnh `assistant` trên terminal."""
     parser = argparse.ArgumentParser(
@@ -600,6 +704,17 @@ def cli() -> None:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Lệnh chức năng")
+
+    # Lệnh ui
+    ui_parser = subparsers.add_parser("ui", help="Khởi động giao diện ứng dụng Desktop (mặc định)")
+    ui_parser.add_argument("--port", type=int, default=None, help="Cổng chạy giao diện (mặc định từ config)")
+    ui_parser.add_argument("--no-browser", action="store_true", help="Không tự động mở cửa sổ trình duyệt")
+    ui_parser.add_argument(
+        "--minimized",
+        "--background",
+        action="store_true",
+        help="Khởi động ngầm ở khay hệ thống, không tự mở cửa sổ chat",
+    )
 
     # Lệnh doctor
     subparsers.add_parser("doctor", help="Kiểm tra môi trường và các kết nối hệ thống")
@@ -623,6 +738,11 @@ def cli() -> None:
         sys.exit(run_models())
     elif args.command == "chat":
         sys.exit(run_chat())
+    elif args.command == "ui" or args.command is None:
+        port_val = getattr(args, "port", None)
+        no_browser_val = getattr(args, "no_browser", False)
+        minimized_val = getattr(args, "minimized", False)
+        sys.exit(run_ui(port=port_val, no_browser=no_browser_val, minimized=minimized_val))
     else:
         parser.print_help()
         sys.exit(0)
