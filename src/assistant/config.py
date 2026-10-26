@@ -29,6 +29,9 @@ class Config:
     telegram_chat_id: str = ""
 
 
+# Bí danh cho Config để tương thích thuận nghịch
+AppConfig = Config
+
 
 def _get_default_data_dir() -> Path:
     """Xác định thư mục dữ liệu mặc định trong %APPDATA%\\AIAssistant."""

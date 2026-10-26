@@ -24,8 +24,7 @@ echo [3/5] Thêm file vào staging...
 git add .
 
 :: 4. Commit mã nguồn
-echo [4/5] Tạo commit mã nguồn...
-git commit -m "feat(desktop): implement system tray, autostart via HKCU, and single instance lock for phase 7" || git commit -m "feat: phase 7 system tray and autostart"
+git commit -m "feat(security): complete phase 8 with security e2e tests, settings diagnostics UI, and pyinstaller packaging" || git commit -m "feat: phase 8 security and pyinstaller packaging"
 
 
 

@@ -162,3 +162,42 @@ class WSServerEvent(BaseModel):
 
     type: ServerEventType
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+# =============================================================================
+# CÀI ĐẶT & CHẨN ĐOÁN (SETTINGS & DIAGNOSTICS)
+# =============================================================================
+
+class KeyUpdateRequest(BaseModel):
+    """Yêu cầu cập nhật Gemini API Key lưu an toàn vào Windows Credential Manager."""
+
+    api_key: str = Field(min_length=1, description="Khóa Gemini API Key mới")
+
+
+class ModelModeUpdateRequest(BaseModel):
+    """Yêu cầu thay đổi chế độ định tuyến model."""
+
+    mode: Literal["auto", "gemini", "local"] = Field(description="Chế độ định tuyến model")
+
+
+class AutostartUpdateRequest(BaseModel):
+    """Yêu cầu bật/tắt tự khởi động cùng Windows."""
+
+    enabled: bool = Field(description="Bật hoặc tắt tự khởi động cùng Windows")
+
+
+class DiagnosticsResponse(BaseModel):
+    """Kết quả chẩn đoán toàn diện hệ thống phục vụ trang Cài đặt & Chẩn đoán."""
+
+    gemini_configured: bool
+    gemini_key_source: str
+    gemini_reachable: bool
+    ollama_running: bool
+    ollama_models: list[str] = Field(default_factory=list)
+    mode: str
+    gemini_model: str
+    local_model: str
+    autostart_enabled: bool
+    workspace_dir: str
+    timezone: str
+

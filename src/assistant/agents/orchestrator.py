@@ -11,7 +11,6 @@ Nguyên tắc:
 from typing import Any
 
 from assistant.agents.spec import SPECIALIZED_AGENTS
-from assistant.core.agent_loop import AgentLoop
 from assistant.core.context import ConversationContext
 from assistant.core.prompts import get_system_prompt
 from assistant.core.router import ModelRouter
@@ -71,11 +70,14 @@ async def run_subagent(
     )
 
     # 4. Khởi tạo vòng lặp agent con với registry giới hạn
+    from assistant.core.agent_loop import AgentLoop
+
     child_agent_loop = AgentLoop(
         router=active_router,
         registry=sandboxed_registry,
         max_steps=spec.max_steps,
     )
+
 
     accumulated_chunks: list[str] = []
     try:

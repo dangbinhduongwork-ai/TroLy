@@ -840,3 +840,232 @@ body {
 .hidden {
     display: none !important;
 }
+
+/* =========================================================================
+   MÀN HÌNH CÀI ĐẶT & CHẨN ĐOÁN (SETTINGS & DIAGNOSTICS)
+   ========================================================================= */
+
+.settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+}
+
+.settings-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.settings-card {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+}
+
+.settings-card .card-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.settings-desc {
+    font-size: 0.86rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+}
+
+.diagnostics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    background-color: var(--bg-primary);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.diag-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.9rem;
+}
+
+.diag-item.full-width {
+    grid-column: span 2;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    border-top: 1px dashed var(--border-color);
+    padding-top: 0.75rem;
+}
+
+.diag-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.diag-value {
+    font-weight: 600;
+}
+
+.diag-value.online {
+    color: #10b981;
+}
+
+.diag-value.offline {
+    color: #f59e0b;
+}
+
+.diag-value.error {
+    color: #ef4444;
+}
+
+.models-tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.model-tag {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.25rem 0.65rem;
+    border-radius: 14px;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.key-input-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.input-password-wrapper {
+    position: relative;
+    flex: 1;
+}
+
+.btn-toggle-eye {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.btn-toggle-eye:hover {
+    opacity: 1;
+}
+
+.key-status-feedback {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.key-status-feedback.success {
+    color: #10b981;
+}
+
+.key-status-feedback.error {
+    color: #ef4444;
+}
+
+.settings-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.setting-row:last-child {
+    border-bottom: none;
+}
+
+.setting-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.setting-name {
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.setting-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.select-mode-wide {
+    min-width: 280px;
+}
+
+.quickstart-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.qs-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+}
+
+.qs-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background-color: #3b82f6;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.qs-desc {
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.qs-desc strong {
+    color: var(--text-primary);
+}
+
+.qs-desc a {
+    color: #3b82f6;
+    text-decoration: underline;
+}
+

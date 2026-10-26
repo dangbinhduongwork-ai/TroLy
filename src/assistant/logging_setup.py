@@ -16,6 +16,18 @@ class SecretFilter(logging.Filter):
 
     # Nhận diện mẫu Google API Key (AIzaSy...) và các chuỗi token nhạy cảm
     API_KEY_PATTERN = re.compile(r"AIzaSy[0-9A-Za-z_-]{33}")
+    _registered_secrets: set[str] = set()
+
+    @classmethod
+    def register_secret(cls, secret: str) -> None:
+        """Đăng ký một chuỗi bí mật (như session token) cần tự động che giấu."""
+        if secret and len(secret) >= 6:
+            cls._registered_secrets.add(secret)
+
+    @classmethod
+    def clear_secrets(cls) -> None:
+        """Xoá danh sách bí mật đã đăng ký (phục vụ kiểm thử)."""
+        cls._registered_secrets.clear()
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not isinstance(record.msg, str):
@@ -31,8 +43,14 @@ class SecretFilter(logging.Filter):
         if gemini_key and len(gemini_key) > 5 and gemini_key in msg:
             msg = msg.replace(gemini_key, "[BÍ_MẬT_KEY]")
 
+        # 3. Che giấu các token bí mật đã đăng ký (như session_token)
+        for sec in self._registered_secrets:
+            if sec in msg:
+                msg = msg.replace(sec, "[BÍ_MẬT_TOKEN]")
+
         record.msg = msg
         return True
+
 
 
 def setup_logging(

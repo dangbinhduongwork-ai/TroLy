@@ -25,21 +25,28 @@ from assistant.memory.store import MemoryStore
 from assistant.reminders.scheduler import ReminderScheduler
 from assistant.reminders.store import ReminderStore
 from assistant.server.schemas import (
+    AutostartUpdateRequest,
     ConversationCreate,
     ConversationItem,
     ConversationUpdate,
+    DiagnosticsResponse,
+    KeyUpdateRequest,
     MemoryCreate,
     MemoryItem,
     MemoryUpdate,
     MessageItem,
+    ModelModeUpdateRequest,
     ReminderCreate,
     ReminderItem,
     ReminderSnooze,
     StatusResponse,
 )
+from assistant.logging_setup import SecretFilter
 from assistant.server.ws import ChatWebSocketManager
 
 _session_token: str = secrets.token_urlsafe(32)
+SecretFilter.register_secret(_session_token)
+
 
 
 def get_current_session_token() -> str:
@@ -52,6 +59,8 @@ def set_current_session_token(token: str) -> None:
     """Thiết lập Session Token mới (dùng cho khởi động hoặc kiểm thử)."""
     global _session_token
     _session_token = token
+    SecretFilter.register_secret(token)
+
 
 
 def verify_session_token(token: str) -> bool:
@@ -330,6 +339,89 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="Không tìm thấy lời nhắc để huỷ.")
         return {"ok": True, "message": "Đã huỷ lời nhắc việc thành công."}
+
+    # =========================================================================
+    # REST API: CÀI ĐẶT & CHẨN ĐOÁN (SETTINGS & DIAGNOSTICS)
+    # =========================================================================
+
+    @app.get("/api/settings/diagnostics", response_model=DiagnosticsResponse, dependencies=[Depends(require_session_token)])
+    async def get_diagnostics() -> dict[str, Any]:
+        """Chẩn đoán toàn diện hệ thống: Gemini, Ollama, Autostart, Workspace."""
+        from assistant.desktop.autostart import is_autostart_enabled
+        from assistant.llm.gemini_provider import get_gemini_api_key
+
+        gemini_key = get_gemini_api_key()
+        gemini_configured = bool(gemini_key)
+        gemini_key_source = "Không"
+        if gemini_configured:
+            import os
+            gemini_key_source = "Biến môi trường" if os.getenv("GEMINI_API_KEY") else "Windows Credential Manager"
+
+        gemini_reachable = False
+        if gemini_configured:
+            gemini_reachable = app_router.is_network_available()
+
+        ollama_running = False
+        ollama_models: list[str] = []
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            res = sock.connect_ex(("127.0.0.1", 11434))
+            ollama_running = (res == 0)
+            sock.close()
+            if ollama_running:
+                ollama_models = await app_router.ollama_provider.list_models()
+        except Exception:
+            pass
+
+        return {
+            "gemini_configured": gemini_configured,
+            "gemini_key_source": gemini_key_source,
+            "gemini_reachable": gemini_reachable,
+            "ollama_running": ollama_running,
+            "ollama_models": ollama_models,
+            "mode": app_router.mode,
+            "gemini_model": app_config.gemini_model,
+            "local_model": app_config.local_model,
+            "autostart_enabled": is_autostart_enabled(),
+            "workspace_dir": str(app_config.workspace_dir),
+            "timezone": app_config.timezone,
+        }
+
+    @app.post("/api/settings/gemini-key", dependencies=[Depends(require_session_token)])
+    async def set_gemini_key(req: KeyUpdateRequest) -> dict[str, Any]:
+        """Lưu Gemini API Key an toàn vào Windows Credential Manager bằng keyring."""
+        import keyring
+        new_key = req.api_key.strip()
+        if not new_key:
+            raise HTTPException(status_code=400, detail="Khóa API Key không được để trống")
+
+        try:
+            keyring.set_password("TroLyAI", "GEMINI_API_KEY", new_key)
+            SecretFilter.register_secret(new_key)
+            # Khởi tạo lại client của Gemini provider
+            app_router.gemini_provider._client = None
+            return {"ok": True, "message": "Đã lưu Gemini API Key an toàn vào Windows Credential Manager!"}
+        except Exception as err:
+            raise HTTPException(status_code=500, detail=f"Lỗi lưu trữ Windows Credential Manager: {err}")
+
+    @app.post("/api/settings/model", dependencies=[Depends(require_session_token)])
+    async def update_model_mode(req: ModelModeUpdateRequest) -> dict[str, Any]:
+        """Cập nhật chế độ định tuyến model (auto / gemini / local)."""
+        app_router.set_mode(req.mode)
+        return {"ok": True, "mode": app_router.mode}
+
+    @app.post("/api/settings/autostart", dependencies=[Depends(require_session_token)])
+    async def update_autostart(req: AutostartUpdateRequest) -> dict[str, Any]:
+        """Bật hoặc tắt tính năng tự khởi động cùng Windows."""
+        from assistant.desktop.autostart import disable_autostart, enable_autostart, is_autostart_enabled
+        if req.enabled:
+            success = enable_autostart(minimized=True)
+        else:
+            success = disable_autostart()
+        return {"ok": success, "autostart_enabled": is_autostart_enabled()}
+
 
     # =========================================================================
     # WEBSOCKET CHAT

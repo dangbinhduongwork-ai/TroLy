@@ -36,6 +36,10 @@
                     <span class="nav-icon">⏰</span>
                     <span class="nav-label">Nhắc việc</span>
                 </button>
+                <button class="nav-item" data-screen="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-label">Cài đặt</span>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -190,6 +194,122 @@
                         <h3>⚠️ Lời Nhắc Bị Bỏ Lỡ (Missed)</h3>
                         <div class="reminder-list" id="missed-reminders-list">
                             <!-- Render missed qua JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. MÀN HÌNH CÀI ĐẶT & CHẨN ĐOÁN -->
+            <section class="screen-view" id="screen-settings">
+                <header class="settings-header">
+                    <h2>⚙️ Cài Đặt & Chẩn Đoán Hệ Thống</h2>
+                    <button class="btn btn-outline btn-sm" id="btn-refresh-diagnostics">
+                        <span>🔄</span> Kiểm tra lại kết nối
+                    </button>
+                </header>
+
+                <div class="settings-content">
+                    <!-- THẺ 1: TRẠNG THÁI KẾT NỐI -->
+                    <div class="settings-card">
+                        <div class="card-title">🌐 Trạng Thái Kết Nối & Mô Hình</div>
+                        <div class="diagnostics-grid">
+                            <div class="diag-item">
+                                <span class="diag-label">Gemini API Cloud:</span>
+                                <span class="diag-value" id="diag-gemini-status">Đang kiểm tra...</span>
+                            </div>
+                            <div class="diag-item">
+                                <span class="diag-label">Nguồn Gemini Key:</span>
+                                <span class="diag-value" id="diag-key-source">-</span>
+                            </div>
+                            <div class="diag-item">
+                                <span class="diag-label">Ollama Cục Bộ:</span>
+                                <span class="diag-value" id="diag-ollama-status">Đang kiểm tra...</span>
+                            </div>
+                            <div class="diag-item">
+                                <span class="diag-label">Chế Độ Hiện Tại:</span>
+                                <span class="diag-value" id="diag-current-mode">-</span>
+                            </div>
+                            <div class="diag-item full-width">
+                                <span class="diag-label">Model Cục Bộ (Ollama) Đã Cài Trên Máy:</span>
+                                <div class="models-tag-list" id="diag-ollama-models">
+                                    <span class="tag-empty">Đang tải...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- THẺ 2: CÀI ĐẶT GEMINI API KEY -->
+                    <div class="settings-card">
+                        <div class="card-title">🔑 Cài Đặt Gemini API Key</div>
+                        <p class="settings-desc">
+                            Khóa được mã hóa và lưu trực tiếp trong <strong>Windows Credential Locker</strong> bằng <code>keyring</code>, tuyệt đối không lưu dạng văn bản thô hay ghi vào nhật ký log.
+                        </p>
+                        <div class="key-input-row">
+                            <div class="input-password-wrapper">
+                                <input type="password" id="input-gemini-key" class="form-control" placeholder="Dán Gemini API Key (AIzaSy...)">
+                                <button type="button" class="btn-toggle-eye" id="btn-toggle-key-visibility" title="Hiện/ẩn khóa">👁️</button>
+                            </div>
+                            <button class="btn btn-primary" id="btn-save-key">Lưu Khóa Vào Windows</button>
+                        </div>
+                        <div class="key-status-feedback" id="key-feedback"></div>
+                    </div>
+
+                    <!-- THẺ 3: ĐIỀU PHỐI MÔ HÌNH VÀ TỰ KHỞI ĐỘNG CÙNG WINDOWS -->
+                    <div class="settings-card">
+                        <div class="card-title">🚀 Thiết Lập Hoạt Động & Windows</div>
+                        <div class="settings-form">
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <label class="setting-name">Chế độ điều phối Model:</label>
+                                    <span class="setting-hint">Tự động chuyển Ollama khi mất mạng hoặc dữ liệu nhạy cảm</span>
+                                </div>
+                                <select id="settings-select-mode" class="form-control select-mode-wide">
+                                    <option value="auto">Tự động (Auto: Gemini ưu tiên, fallback Ollama)</option>
+                                    <option value="gemini">Chỉ dùng Gemini (Cloud)</option>
+                                    <option value="local">Chỉ dùng Cục bộ (Ollama Offline)</option>
+                                </select>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <label class="setting-name">Khởi động cùng Windows:</label>
+                                    <span class="setting-hint">Chạy ngầm ở khay hệ thống, không tự bung cửa sổ (HKCU, không cần Admin)</span>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="chk-autostart">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <label class="setting-name">Thư mục làm việc an toàn (Workspace):</label>
+                                    <span class="setting-hint" id="settings-ws-hint">C:\AI_Workspace</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- THẺ 4: HƯỚNG DẪN BẮT ĐẦU NHANH -->
+                    <div class="settings-card quickstart-card">
+                        <div class="card-title">💡 Hướng Dẫn Nhanh & Mẹo Sử Dụng</div>
+                        <div class="quickstart-steps">
+                            <div class="qs-step">
+                                <span class="qs-num">1</span>
+                                <div class="qs-desc"><strong>Lấy Gemini API Key:</strong> Tạo khóa miễn phí tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a> và dán vào ô bên trên để lưu.</div>
+                            </div>
+                            <div class="qs-step">
+                                <span class="qs-num">2</span>
+                                <div class="qs-desc"><strong>Chạy cục bộ (Offline):</strong> Cài đặt <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> và kéo model: <code>ollama run qwen2.5:7b</code>. Trợ lý tự chuyển sang khi mất mạng.</div>
+                            </div>
+                            <div class="qs-step">
+                                <span class="qs-num">3</span>
+                                <div class="qs-desc"><strong>Bảo mật nhạy cảm:</strong> Gạt công tắc 🔒 Nhạy cảm trên thanh chat để đảm bảo thông tin chỉ được xử lý tại máy tính nội bộ.</div>
+                            </div>
+                            <div class="qs-step">
+                                <span class="qs-num">4</span>
+                                <div class="qs-desc"><strong>Sao lưu dữ liệu:</strong> Toàn bộ lịch sử trò chuyện, trí nhớ dài hạn và lời nhắc được lưu tại <code>%APPDATA%\AIAssistant\assistant.db</code>.</div>
+                            </div>
                         </div>
                     </div>
                 </div>

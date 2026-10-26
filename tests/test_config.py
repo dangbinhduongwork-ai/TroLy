@@ -133,3 +133,11 @@ def test_secret_filter_masks_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     filter_obj.filter(record)
     assert fake_key not in record.msg
     assert "[BÍ_MẬT" in record.msg
+
+
+def test_appconfig_alias() -> None:
+    """Kiểm tra bí danh AppConfig tương thích hoàn toàn với Config."""
+    from assistant.config import AppConfig, Config
+
+    assert AppConfig is Config
+

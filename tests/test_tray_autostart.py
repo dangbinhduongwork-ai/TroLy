@@ -207,3 +207,12 @@ def test_doctor_command_reports_autostart_and_tray(capsys) -> None:
     assert "Khởi động cùng Windows" in captured
     assert "Khay hệ thống (Tray)" in captured
     assert "Tiến trình Single Instance" in captured
+
+
+def test_main_module_entrypoint() -> None:
+    """Kiểm tra module __main__.py và hàm cli có sẵn để thực thi python -m assistant."""
+    import assistant.__main__ as main_mod
+
+    assert hasattr(main_mod, "cli")
+    assert callable(main_mod.cli)
+

@@ -18,12 +18,25 @@ from assistant.logging_setup import SecretFilter
 def _sanitize_value(val: Any) -> Any:
     """Đệ quy làm sạch và che giấu các khóa bí mật trong tham số hoặc kết quả."""
     if isinstance(val, str):
-        # Che giấu theo pattern của SecretFilter
+        # 1. Che giấu theo pattern của SecretFilter
         val = SecretFilter.API_KEY_PATTERN.sub("[BÍ_MẬT_KEY]", val)
+
+        # 2. Che giấu GEMINI_API_KEY từ môi trường nếu có
+        import os
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if gemini_key and len(gemini_key) > 5 and gemini_key in val:
+            val = val.replace(gemini_key, "[BÍ_MẬT_KEY]")
+
+        # 3. Che giấu các token bí mật đã đăng ký (như session_token)
+        for sec in getattr(SecretFilter, "_registered_secrets", set()):
+            if sec in val:
+                val = val.replace(sec, "[BÍ_MẬT_TOKEN]")
+
         # Cắt ngắn nếu chuỗi quá dài (không ghi toàn bộ nội dung file vào audit log)
         if len(val) > 200:
             return val[:197] + "..."
         return val
+
     elif isinstance(val, dict):
         return {k: _sanitize_value(v) for k, v in val.items()}
     elif isinstance(val, (list, tuple)):

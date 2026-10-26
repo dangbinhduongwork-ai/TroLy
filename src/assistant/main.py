@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 from assistant import __version__
-from assistant.config import load_config
+from assistant.config import Config, load_config
 from assistant.core.context import ConversationContext
 from assistant.core.prompts import get_system_prompt
 from assistant.core.router import ModelRouter, RouterMode
@@ -266,6 +266,29 @@ async def _chat_session() -> None:
     set_global_scheduler(scheduler)
     missed_report = scheduler.start()
 
+    try:
+        await _interactive_chat_loop(
+            config=config,
+            store=store,
+            reminder_store=reminder_store,
+            router=router,
+            scheduler=scheduler,
+            missed_report=missed_report,
+        )
+    finally:
+        scheduler.shutdown()
+        set_global_scheduler(None)
+
+
+async def _interactive_chat_loop(
+    config: Config,
+    store: MemoryStore,
+    reminder_store: ReminderStore,
+    router: ModelRouter,
+    scheduler: ReminderScheduler,
+    missed_report: str,
+) -> None:
+    """Vòng lặp tương tác nhập lệnh và hỏi đáp với trợ lý trong terminal."""
     # Khởi tạo cuộc hội thoại mới trong DB
     current_conv_id = store.create_conversation(title="Cuộc trò chuyện mới", is_sensitive=False)
     is_sensitive = False
@@ -295,17 +318,15 @@ async def _chat_session() -> None:
         print("\n" + missed_report)
     print()
 
-
     import assistant.tools  # noqa: F401 (Nạp toàn bộ công cụ hệ thống vào registry)
     from assistant.core.agent_loop import AgentLoop
 
     agent_loop = AgentLoop(router=router)
 
-    try:
-        while True:
-            try:
-                sensitive_tag = " [NHẠY CẢM]" if is_sensitive else ""
-                user_input = input(f"Bạn{sensitive_tag}: ").strip()
+    while True:
+        try:
+            sensitive_tag = " [NHẠY CẢM]" if is_sensitive else ""
+            user_input = input(f"Bạn{sensitive_tag}: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nTạm biệt!")
             break
@@ -597,9 +618,6 @@ async def _chat_session() -> None:
 
         except Exception as err:
             print(f"\n[LỖI KHÔNG MONG MUỐN] Đã xảy ra lỗi: {err}\n")
-    finally:
-        scheduler.shutdown()
-        set_global_scheduler(None)
 
 
 

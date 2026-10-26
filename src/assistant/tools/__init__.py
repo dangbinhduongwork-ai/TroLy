@@ -3,7 +3,6 @@
 Tự động nạp toàn bộ các công cụ đã đăng ký.
 """
 
-from assistant.agents.orchestrator import delegate_to_agent
 from assistant.tools.apps import open_app, open_path, open_url
 from assistant.tools.docs import (
     create_docx,
@@ -35,6 +34,8 @@ from assistant.tools.reminder_tools import (
 from assistant.tools.shell import run_command
 from assistant.tools.system import get_system_info
 from assistant.tools.web import fetch_webpage
+from assistant.agents.orchestrator import delegate_to_agent
+
 
 __all__ = [
     "default_tool_registry",

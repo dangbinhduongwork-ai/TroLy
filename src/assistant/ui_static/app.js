@@ -634,6 +634,109 @@ async function saveReminder() {
 }
 
 // =============================================================================
+// CÀI ĐẶT & CHẨN ĐOÁN (SETTINGS & DIAGNOSTICS)
+// =============================================================================
+
+async function loadDiagnostics() {
+    try {
+        const res = await apiFetch("/api/settings/diagnostics");
+        if (!res) return;
+
+        // 1. Trạng thái Gemini API Cloud
+        const geminiEl = document.getElementById("diag-gemini-status");
+        if (res.gemini_configured && res.gemini_reachable) {
+            geminiEl.innerText = "🟢 Hoạt động tốt (Online)";
+            geminiEl.className = "diag-value online";
+        } else if (res.gemini_configured && !res.gemini_reachable) {
+            geminiEl.innerText = "🟡 Đã có Key (Mất mạng / Không kết nối)";
+            geminiEl.className = "diag-value offline";
+        } else {
+            geminiEl.innerText = "⚪ Chưa cài đặt API Key";
+            geminiEl.className = "diag-value error";
+        }
+
+        // 2. Nguồn API Key
+        document.getElementById("diag-key-source").innerText = res.gemini_key_source || "Không";
+
+        // 3. Trạng thái Ollama cục bộ
+        const ollamaEl = document.getElementById("diag-ollama-status");
+        if (res.ollama_running) {
+            ollamaEl.innerText = "🟢 Đang chạy (Sẵn sàng cổng 11434)";
+            ollamaEl.className = "diag-value online";
+        } else {
+            ollamaEl.innerText = "⚪ Chưa bật (Không phản hồi port 11434)";
+            ollamaEl.className = "diag-value offline";
+        }
+
+        // 4. Chế độ hiện tại
+        const modeLabels = { auto: "Tự động (Auto)", gemini: "Chỉ dùng Gemini (Cloud)", local: "Chỉ dùng Cục bộ (Ollama)" };
+        document.getElementById("diag-current-mode").innerText = modeLabels[res.mode] || res.mode;
+
+        const modeSelect = document.getElementById("settings-select-mode");
+        if (modeSelect) modeSelect.value = res.mode;
+
+        // 5. Autostart checkbox
+        const autoCheck = document.getElementById("chk-autostart");
+        if (autoCheck) autoCheck.checked = Boolean(res.autostart_enabled);
+
+        // 6. Workspace path
+        const wsEl = document.getElementById("settings-ws-hint");
+        if (wsEl) wsEl.innerText = res.workspace_dir || "C:\\AI_Workspace";
+
+        // 7. Danh sách model Ollama cục bộ
+        const modelsList = document.getElementById("diag-ollama-models");
+        if (modelsList) {
+            modelsList.innerHTML = "";
+            if (res.ollama_models && res.ollama_models.length > 0) {
+                res.ollama_models.forEach((m) => {
+                    const tag = document.createElement("span");
+                    tag.className = "model-tag";
+                    tag.innerText = m;
+                    modelsList.appendChild(tag);
+                });
+            } else {
+                modelsList.innerHTML = `<span class="tag-empty">${res.ollama_running ? "(Chưa có model nào. Hãy chạy: ollama pull qwen2.5:7b)" : "(Ollama chưa bật)"}</span>`;
+            }
+        }
+    } catch (err) {
+        console.error("Lỗi tải chẩn đoán:", err);
+    }
+}
+
+async function saveGeminiKey() {
+    const keyInput = document.getElementById("input-gemini-key");
+    const feedback = document.getElementById("key-feedback");
+    const keyVal = keyInput.value.trim();
+
+    if (!keyVal) {
+        feedback.innerText = "⚠️ Vui lòng nhập API Key hợp lệ trước khi bấm lưu.";
+        feedback.className = "key-status-feedback error";
+        return;
+    }
+
+    try {
+        const res = await apiFetch("/api/settings/gemini-key", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ api_key: keyVal }),
+        });
+        if (res && res.ok) {
+            feedback.innerText = "✅ " + res.message;
+            feedback.className = "key-status-feedback success";
+            keyInput.value = "";
+            loadDiagnostics();
+        } else {
+            feedback.innerText = "❌ Lỗi: " + (res?.detail || "Không thể lưu khóa.");
+            feedback.className = "key-status-feedback error";
+        }
+    } catch (err) {
+        feedback.innerText = "❌ Lỗi: " + err.message;
+        feedback.className = "key-status-feedback error";
+    }
+}
+
+
+// =============================================================================
 // KHỞI TẠO VÀ LẮNG NGHE SỰ KIỆN (INITIALIZATION)
 // =============================================================================
 
@@ -651,6 +754,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             if (state.currentScreen === "memories") loadMemories();
             if (state.currentScreen === "reminders") loadReminders();
+            if (state.currentScreen === "settings") loadDiagnostics();
         };
     });
 
@@ -758,7 +862,62 @@ document.addEventListener("DOMContentLoaded", async () => {
         sendUserMessage();
     };
 
-    // 8. Tải trạng thái và nạp dữ liệu ban đầu
+    // 8. Sự kiện màn hình Cài đặt & Chẩn đoán
+    const btnSaveKey = document.getElementById("btn-save-key");
+    if (btnSaveKey) btnSaveKey.onclick = saveGeminiKey;
+
+    const btnToggleEye = document.getElementById("btn-toggle-key-visibility");
+    if (btnToggleEye) {
+        btnToggleEye.onclick = () => {
+            const keyInp = document.getElementById("input-gemini-key");
+            if (keyInp.type === "password") {
+                keyInp.type = "text";
+                btnToggleEye.innerText = "🔒";
+            } else {
+                keyInp.type = "password";
+                btnToggleEye.innerText = "👁️";
+            }
+        };
+    }
+
+    const btnRefreshDiag = document.getElementById("btn-refresh-diagnostics");
+    if (btnRefreshDiag) btnRefreshDiag.onclick = loadDiagnostics;
+
+    const selectSettingsMode = document.getElementById("settings-select-mode");
+    if (selectSettingsMode) {
+        selectSettingsMode.onchange = async (e) => {
+            try {
+                await apiFetch("/api/settings/model", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode: e.target.value }),
+                });
+                const chatModeSelect = document.getElementById("select-model-mode");
+                if (chatModeSelect) chatModeSelect.value = e.target.value;
+                loadDiagnostics();
+            } catch (err) {
+                alert("Lỗi đổi chế độ model: " + err.message);
+            }
+        };
+    }
+
+    const chkAutostart = document.getElementById("chk-autostart");
+    if (chkAutostart) {
+        chkAutostart.onchange = async (e) => {
+            try {
+                await apiFetch("/api/settings/autostart", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: e.target.checked }),
+                });
+                loadDiagnostics();
+            } catch (err) {
+                alert("Lỗi đổi cài đặt tự khởi động: " + err.message);
+            }
+        };
+    }
+
+    // 9. Tải trạng thái và nạp dữ liệu ban đầu
     try {
         const status = await apiFetch("/api/status");
         document.getElementById("ws-path-text").innerText = status.workspace_dir || "Workspace";

@@ -198,31 +198,79 @@ python scripts/check_tool_calling.py --model gemini-2.5-flash --provider gemini
 
 ---
 
-### Bước 14: Chạy kiểm thử tự động và kiểm tra mã sạch
+### Bước 14: Chạy kiểm thử tự động và kiểm tra bảo mật
 Chạy toàn bộ unit tests:
 ```powershell
 pytest -v
 ```
 
-Chạy riêng bộ kiểm thử Khay hệ thống & Autostart:
+Chạy riêng bộ kiểm thử bảo mật End-to-End:
 ```powershell
-pytest tests/test_tray_autostart.py -v
+pytest tests/test_security_e2e.py -v
 ```
 
-Kiểm tra cú pháp linter bằng `ruff`:
+Kiểm tra mã nguồn bằng `ruff`:
 ```powershell
 ruff check .
 ```
 
+---
 
+### Bước 15: Đóng gói thành tệp chạy Windows (.exe) hoàn chỉnh
 
+Bạn có thể đóng gói toàn bộ ứng dụng thành tệp thực thi Windows độc lập:
+```powershell
+python scripts/build_exe.py
+# Hoặc nhấp đúp tệp:
+.\scripts\build_app.bat
+```
+
+Sau khi đóng gói hoàn tất:
+1. Thư mục cài đặt độc lập nằm tại: `dist/Assistant/`.
+2. Script sẽ tự động tạo lối tắt (Shortcut) mang tên **Trợ Lý AI** ngay trên màn hình Desktop của bạn.
+3. Bạn chỉ cần bấm đúp chuột vào shortcut để mở Trợ lý mà không cần mở terminal hay IDE.
 
 ---
 
-## 3. Cấu Trúc Thư Mục Dự Án (src Layout)
+## 4. Hướng Dẫn Sử Dụng Hằng Ngày & Bảo Trì
+
+### A. Thêm Mô Hình Cục Bộ Mới (Ollama)
+1. Tải và cài đặt Ollama từ [ollama.com](https://ollama.com).
+2. Kéo mô hình bạn muốn dùng về máy bằng terminal:
+   ```powershell
+   ollama pull qwen2.5:7b
+   # hoặc:
+   ollama pull llama3.2:3b
+   ```
+3. Mở ứng dụng Trợ Lý AI -> Chọn tab **Cài đặt & Chẩn đoán** -> Mục "Model Cục Bộ Đã Cài Trên Máy" sẽ tự động nhận diện và hiển thị mô hình mới.
+
+### B. Sao Lưu & Phục Hồi Dữ Liệu
+Toàn bộ cơ sở dữ liệu hội thoại, lịch sử tin nhắn, trí nhớ dài hạn và các lời nhắc việc được lưu trữ tại:
+```text
+%APPDATA%\AIAssistant\
+├── assistant.db            # Cơ sở dữ liệu SQLite chính (WAL mode)
+├── assistant.db-wal        # Tệp nhật ký ghi trước
+└── logs/                   # Nhật ký hoạt động và kiểm toán audit.jsonl
+```
+- **Sao lưu**: Bạn chỉ cần copy tệp `assistant.db` sang ổ cứng di động hoặc thư mục lưu trữ cá nhân.
+- **Phục hồi**: Dán lại tệp `assistant.db` vào thư mục `%APPDATA%\AIAssistant\` trên máy tính mới.
+
+### C. Xử Lý Sự Cố Thường Gặp (Troubleshooting)
+1. **Trợ lý báo mất mạng hoặc không gọi được Gemini**:
+   - Trợ lý sẽ tự động chuyển sang mô hình Ollama cục bộ nếu máy bạn đã cài Ollama.
+   - Để kiểm tra lại khóa API, vào tab **Cài đặt** trên giao diện web, dán lại Gemini API Key và bấm **Lưu Khóa Vào Windows**.
+2. **Cổng 8000 bị xung đột**:
+   - Vào `config/settings.toml`, đổi `ui_port = 8888` (hoặc cổng bất kỳ bạn muốn), sau đó khởi động lại.
+3. **Ứng dụng không mở cửa sổ sau khi nhấp chạy**:
+   - Kiểm tra Khay hệ thống (góc dưới bên phải màn hình Windows gần đồng hồ), nhấp chuột phải vào biểu tượng con robot 🤖 và chọn **💬 Mở cửa sổ Trợ lý**.
+
+---
+
+## 5. Cấu Trúc Thư Mục Dự Án (src Layout)
 ```text
 TroLy/
-├── pyproject.toml          # Cấu hình gói assistant, ruff, pytest
+├── pyproject.toml          # Cấu hình gói assistant, pyinstaller, ruff, pytest
+├── assistant.spec          # Cấu hình đóng gói PyInstaller Windows onedir
 ├── README.md               # Tài liệu hướng dẫn cài đặt và sử dụng
 ├── .env.example            # Mẫu khai báo biến môi trường
 ├── .gitignore              # Danh sách file và thư mục loại trừ khỏi git
@@ -232,25 +280,30 @@ TroLy/
 ├── docs/
 │   └── DECISIONS.md        # Nhật ký quyết định kiến trúc và thư viện (ADR)
 ├── scripts/
-│   ├── check_env.py        # Script kiểm tra môi trường Python 3.11+ và Git
-│   └── setup_project.bat   # Script tự động hoá cài đặt một nhấp chuột
-├── tests/
-│   ├── __init__.py
-│   └── test_config.py      # Unit test cho module config và bảo mật
+│   ├── check_env.py        # Kiểm tra môi trường Python 3.11+ và Git
+│   ├── build_exe.py        # Kịch bản đóng gói PyInstaller & tạo shortcut Desktop
+│   ├── build_app.bat       # Trình đóng gói một nhấp chuột cho Windows
+│   ├── run_app.bat         # Trình khởi chạy nhanh giao diện Desktop
+│   └── push_to_git.bat     # Tự động hóa đồng bộ commit lên GitHub
+├── tests/                  # Bộ kiểm thử tự động toàn diện (20+ test suites)
+│   ├── test_security_e2e.py# Kiểm thử bảo mật Prompt Injection & Chống rò rỉ bí mật
+│   └── ...
 └── src/
     └── assistant/          # Mã nguồn chính của ứng dụng
         ├── __init__.py
-        ├── config.py       # Nạp cấu hình toml và biến môi trường
-        ├── logging_setup.py# Xoay vòng file log và lọc mã bí mật
-        ├── main.py         # Entrypoint CLI: assistant --version & doctor
-        ├── core/           # Điều phối trung tâm
-        ├── llm/            # Kết nối Gemini API & Ollama
-        ├── tools/          # Công cụ thao tác file, app, shell
-        ├── safety/         # Phân quyền, kiểm tra path traversal
-        ├── memory/         # Trí nhớ dài hạn cục bộ
-        ├── reminders/      # Quản lý nhắc việc
-        ├── agents/         # Đa agent chuyên trách
-        ├── server/         # Máy chủ web backend
-        ├── desktop/        # Khay hệ thống và cửa sổ ứng dụng
-        └── ui_static/      # Giao diện web người dùng
+        ├── __main__.py     # Điểm nhập chạy module: python -m assistant
+        ├── config.py       # Nạp cấu hình toml, biến môi trường và bí danh
+        ├── logging_setup.py# Xoay vòng file log và SecretFilter bảo vệ khóa
+        ├── main.py         # Entrypoint CLI: assistant doctor, chat, ui
+        ├── core/           # Điều phối trung tâm, AgentLoop, Context, Router
+        ├── llm/            # Gemini SDK mới & Ollama HTTP client
+        ├── tools/          # Công cụ an toàn (file, app, shell, docs, web)
+        ├── safety/         # Phân quyền 3 cấp, chống prompt injection, audit JSONL
+        ├── memory/         # Trí nhớ dài hạn SQLite FTS5 & tự trích xuất
+        ├── reminders/      # Bộ lập lịch APScheduler & Windows Toast
+        ├── agents/         # Đa Agent chuyên trách (Multi-agent Orchestrator)
+        ├── server/         # Máy chủ FastAPI, REST API, WebSocket & Cài đặt
+        ├── desktop/        # Khay hệ thống, Autostart HKCU, Single Instance
+        └── ui_static/      # Giao diện ứng dụng ngoại tuyến (HTML/CSS/JS)
 ```
+

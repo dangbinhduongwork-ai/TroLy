@@ -153,9 +153,34 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   4. **Cập nhật lệnh `assistant doctor`**:
      - Bổ sung chẩn đoán trạng thái Autostart, Khay hệ thống và Single Instance.
 - **Lý do**: Tối ưu trải nghiệm sử dụng hàng ngày trên Windows, đảm bảo tính năng nhắc việc luôn chạy đúng giờ mà không làm người dùng cảm thấy bị vướng víu trên màn hình.
+### [2026-10-26] Sửa lỗi cú pháp main.py và Bổ sung điểm nhập __main__.py cho gói assistant
+- **Bối cảnh**: Khi người dùng chạy lệnh `assistant` hoặc `python -m assistant ui`, phát sinh 2 lỗi:
+  1. `SyntaxError: expected 'except' or 'finally' block` tại dòng 309 của `main.py` do cấu trúc thụt đầu dòng (indentation) khi bọc scheduler trong `try...finally`.
+  2. `No module named assistant.__main__; 'assistant' is a package and cannot be directly executed` khi chạy bằng `python -m assistant`.
+- **Phương án đã chọn**:
+  1. Tách hàm `_interactive_chat_loop()` riêng biệt khỏi `_chat_session()`. Trong `_chat_session()`, sử dụng `try: await _interactive_chat_loop(...) finally: scheduler.shutdown(); set_global_scheduler(None)` để đảm bảo giải phóng tài nguyên. Trong `_interactive_chat_loop()`, cấu trúc vòng lặp `while True:` được căn lề chuẩn 4 spaces, giải quyết triệt để lỗi cú pháp.
+  2. Tạo mới `src/assistant/__main__.py` gọi hàm `cli()` từ `assistant.main`, cho phép chạy trực tiếp bằng `python -m assistant ui` hoặc thông qua `scripts/run_app.bat` và registry autostart.
+- **Lý do**: Tuân thủ chuẩn packaging của Python và đảm bảo mọi phương thức khởi động (`assistant`, `assistant ui`, `python -m assistant`, `scripts/run_app.bat`) đều vận hành hoàn hảo và đồng nhất.
+
+### [2026-10-26] Giai đoạn 8: Rà soát bảo mật toàn diện, Tối ưu giao diện và Đóng gói PyInstaller
+- **Bối cảnh**: Cần hoàn thiện khâu kiểm thử bảo mật chống Prompt Injection và chống rò rỉ secret, bổ sung giao diện cấu hình trực quan không cần gõ lệnh, và đóng gói thành tệp chạy Windows (.exe) độc lập để người dùng mở bằng cách bấm đúp chuột ngoài Desktop mà không cần terminal.
+- **Phương án đã chọn**:
+  1. **Khắc phục Circular Import**: Trì hoãn việc import `AgentLoop` bên trong `run_subagent()` trong `agents/orchestrator.py` và tái cấu trúc thứ tự nạp module trong `tools/__init__.py`.
+  2. **Bộ kiểm thử bảo mật `tests/test_security_e2e.py`**:
+     - Kiểm thử bọc `<untrusted_content>` và đánh dấu lây nhiễm (Taint Tracking): buộc mọi hành động ghi/lệnh phải được duyệt khi đã đọc tài liệu ngoài.
+     - Kiểm thử từ chối cứng (DENY) cho các lệnh shell phá hoại hệ thống.
+     - Kiểm thử chống rò rỉ `GEMINI_API_KEY` và `session_token` trong log xoay vòng và `audit.jsonl` qua cơ chế `SecretFilter.register_secret()`.
+  3. **Trang Cài đặt & Chẩn đoán trên Web UI**:
+     - Bổ sung màn hình `screen-settings` cho phép kiểm tra trực tiếp trạng thái kết nối Gemini Cloud, trạng thái Ollama cục bộ, danh sách model Ollama đã cài.
+     - Nhập và lưu Gemini API Key trực tiếp vào Windows Credential Locker qua API `/api/settings/gemini-key` bảo mật bằng `keyring`.
+  4. **Đóng gói PyInstaller (`assistant.spec` & `scripts/build_exe.py`)**:
+     - Lựa chọn `--onedir`: Khởi động nhanh, ổn định hơn và tránh bị các phần mềm diệt virus trên Windows gắn cờ cảnh báo nhầm (false positive) so với chế độ nén `--onefile`.
+     - Lựa chọn `--noconsole` (`windowed=True`): Không làm bật cửa sổ console màu đen khi khởi động.
+     - Tự động tạo Shortcut `.lnk` ngoài Desktop người dùng qua lệnh PowerShell COM `WScript.Shell`.
+- **Lý do**: Đảm bảo an toàn tuyệt đối theo 12 Nguyên tắc bất biến, nâng cao trải nghiệm người dùng cuối trên Windows và cung cấp khả năng phân phối phần mềm chuyên nghiệp.
 - **Thư viện mới**:
-  - `pystray>=0.19.5`: Điều khiển biểu tượng khay hệ thống trên Windows.
-  - `Pillow>=10.2.0`: Tự sinh ảnh biểu tượng icon động trong bộ nhớ.
+  - `pyinstaller>=6.5.0`: Đóng gói ứng dụng Python thành tệp nhị phân thực thi Windows.
+
 
 
 
