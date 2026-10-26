@@ -77,17 +77,66 @@ Khởi động giao diện chat:
 ```powershell
 assistant chat
 ```
-Trong phiên chat, bạn có thể gõ:
-- `/model auto`: Tự động chọn model (Gemini khi có mạng, Ollama khi mất mạng hoặc nhạy cảm).
-- `/model gemini`: Ép buộc sử dụng Gemini.
-- `/model local`: Ép buộc sử dụng mô hình Ollama cục bộ trên máy.
-- `/clear`: Xóa lịch sử hội thoại hiện tại.
-- `/exit`: Thoát khỏi ứng dụng.
+Trong phiên chat, bạn có thể ra lệnh bằng tiếng Việt:
+- *"tạo file ghi-chu.txt trong workspace"* -> AI tự động tạo file mới.
+- *"mở Notepad"* -> AI khởi động ứng dụng Notepad.
+- *"mở thư mục workspace"* -> AI mở thư mục bằng File Explorer.
+- *"xóa file ghi-chu.txt"* -> AI xin phép bạn duyệt `(y/N)`, nếu đồng ý sẽ chuyển file vào Thùng rác Windows an toàn qua `send2trash`.
+- *"chạy lệnh dir"* -> AI hiển thị nguyên văn lệnh và xin phép duyệt `(y/N)` trước khi chạy.
+
+Các lệnh điều khiển nhanh trong chat:
+- `/model <auto|gemini|local>`: Đổi chế độ điều phối mô hình (Gemini khi có mạng, Ollama khi mất mạng hoặc nhạy cảm).
+- `/sensitive`: Bật/tắt chế độ nhạy cảm (khi bật, mọi câu hỏi và trí nhớ CHỈ xử lý trên Ollama cục bộ, không gửi lên đám mây).
+- `/history`: Xem danh sách các cuộc hội thoại cũ (`/history <id>` để chuyển, `/history new` để tạo mới, `/history del <id>` để xóa).
+- `/memories`: Xem danh sách toàn bộ trí nhớ dài hạn mà AI đã ghi nhớ về bạn kèm ID và danh mục.
+- `/memory-edit <id> <nội dung mới>`: Chủ động sửa lại thông tin trí nhớ nếu AI ghi nhận chưa chuẩn.
+- `/memory-del <id>`: Xóa bỏ một mục trí nhớ theo ID.
+- `/reminders`: Xem danh sách các lời nhắc việc (đang chờ, đã nhắc, hoãn, bị lỡ).
+- `/snooze <id> [phút]`: Hoãn một lời nhắc lại thêm số phút (mặc định 10 phút).
+- `/cancel <id>`: Huỷ một lời nhắc việc.
+- `/briefing`: Xem bản tin sáng tổng hợp công việc và lịch nhắc trong ngày.
+- `/clear`: Xóa ngữ cảnh cuộc trò chuyện hiện tại.
+- `/exit` hoặc `/quit`: Thoát khỏi ứng dụng.
 
 ---
 
-### Bước 8: Chạy kiểm thử tự động và kiểm tra mã sạch
-Chạy unit test:
+### Bước 8: Kiểm tra Trí Nhớ Dài Hạn (Long-term Memory)
+Thử nghiệm ghi nhớ thông tin cá nhân hoặc quy tắc qua các phiên làm việc:
+1. Bạn gõ: `Hãy nhớ tôi thích đặt tên file báo cáo theo mẫu YYYY-MM-DD_ten-bao-cao`
+2. AI phản hồi và tự động lưu vào cơ sở dữ liệu SQLite (`assistant.db`).
+3. Gõ `/memories` để kiểm tra danh sách trí nhớ.
+4. Gõ `/exit` để thoát ứng dụng hoàn toàn.
+5. Khởi động lại bằng `assistant chat` và hỏi: `Quy tắc đặt tên file báo cáo của tôi là gì?`
+6. AI tự động truy xuất trí nhớ đã nạp vào ngữ cảnh và trả lời chính xác quy tắc của bạn.
+
+---
+
+### Bước 9: Đặt Lịch Nhắc Việc và Thông Báo Windows Toast (Reminders)
+Thử nghiệm hệ thống nhắc việc đúng giờ (chạy thuần APScheduler, không phụ thuộc mạng khi đến giờ):
+1. Bạn gõ: `Nhắc tôi uống nước sau 1 phút nữa`
+2. AI xác nhận ngày, giờ cụ thể và lưu vào SQLite.
+3. Sau 1 phút, Windows Toast hiển thị trên góc màn hình kèm âm thanh thông báo.
+4. Gõ `/snooze <id> 5` để hoãn lại 5 phút, hoặc `/cancel <id>` để huỷ lời nhắc.
+5. Gõ `/briefing` để nhận bản tin sáng chào ngày mới và tóm tắt công việc trong ngày.
+6. Chạy kịch bản kiểm tra toàn diện luồng nhắc việc:
+   ```powershell
+   python scripts/test_reminder_flow.py
+   ```
+
+---
+
+### Bước 10: Kiểm định khả năng gọi công cụ của Model
+Chạy script kiểm tra xem mô hình có gọi đúng công cụ tạo file hay không:
+```powershell
+python scripts/check_tool_calling.py --model qwen2.5:7b
+python scripts/check_tool_calling.py --model gemini-2.5-flash --provider gemini
+```
+
+
+---
+
+### Bước 9: Chạy kiểm thử tự động và kiểm tra mã sạch
+Chạy bộ unit test toàn diện:
 ```powershell
 pytest -v
 ```
@@ -96,6 +145,7 @@ Kiểm tra cú pháp linter bằng `ruff`:
 ```powershell
 ruff check .
 ```
+
 
 
 ---

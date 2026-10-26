@@ -22,7 +22,9 @@ Nhiệm vụ của bạn:
 1. Giao tiếp hoàn toàn bằng tiếng Việt tự nhiên, lịch sự, ngắn gọn và rõ ràng.
 2. Hỗ trợ người dùng thực hiện các công việc trên máy: thao tác file, mở phần mềm/thư mục/trang web, chạy lệnh an toàn, ghi nhớ thông tin và nhắc việc.
 3. Khi xử lý các tác vụ có tính phá hủy (xóa, ghi đè, chạy lệnh hệ thống), bạn luôn phải yêu cầu người dùng xác nhận và giải thích rõ hành động sắp làm.
-4. Tôn trọng quyền riêng tư: dữ liệu cá nhân của người dùng luôn được bảo vệ tối đa."""
+4. Tôn trọng quyền riêng tư: dữ liệu cá nhân của người dùng luôn được bảo vệ tối đa.
+5. Khi đặt lịch nhắc việc: Bạn không làm đồng hồ canh giờ. Hãy dùng công cụ create_reminder với thời gian ISO 8601 chuẩn xác dựa trên thời gian hệ thống ở trên. Luôn nêu rõ thứ, ngày, tháng, giờ cụ thể khi xác nhận lại với người dùng để tránh hiểu lầm các từ tương đối ("mai", "tuần sau", "chiều nay")."""
+
 
 
 def get_current_time_str(timezone_str: str = "Asia/Ho_Chi_Minh") -> str:
@@ -43,15 +45,32 @@ def get_current_time_str(timezone_str: str = "Asia/Ho_Chi_Minh") -> str:
 def get_system_prompt(
     custom_instructions: str | None = None,
     timezone_str: str = "Asia/Ho_Chi_Minh",
+    memories: list[dict] | None = None,
 ) -> str:
-    """Tạo prompt hệ thống hoàn chỉnh chứa thông tin thời gian hiện tại."""
+    """Tạo prompt hệ thống hoàn chỉnh chứa thời gian hiện tại, quy tắc an toàn và trí nhớ dài hạn."""
+    from assistant.safety.injection import get_anti_injection_instructions
+
     time_str = get_current_time_str(timezone_str)
     prompt_parts = [
         BASE_SYSTEM_PROMPT,
         f"\n[THÔNG TIN HỆ THỐNG]\nThời gian hiện tại: {time_str}",
+        f"\n{get_anti_injection_instructions()}",
     ]
+
+    # Chèn trí nhớ dài hạn về người dùng nếu có
+    if memories:
+        mem_lines = ["\n[TRÍ NHỚ DÀI HẠN VỀ NGƯỜI DÙNG]"]
+        for m in memories:
+            cat = m.get("category", "thông tin")
+            content = m.get("content", "").strip()
+            if content:
+                mem_lines.append(f"- ({cat}): {content}")
+        if len(mem_lines) > 1:
+            prompt_parts.append("\n".join(mem_lines))
 
     if custom_instructions and custom_instructions.strip():
         prompt_parts.append(f"\n[CHỈ DẪN BỔ SUNG]\n{custom_instructions.strip()}")
 
     return "\n".join(prompt_parts)
+
+

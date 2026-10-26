@@ -4,11 +4,12 @@ Khi độ dài hội thoại vượt quá ngân sách token cấu hình, lớp C
 kích hoạt tóm tắt phần lịch sử cũ (bằng model cục bộ) và bảo toàn các lượt trao đổi gần nhất.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from assistant.llm.base import Message
 
 if TYPE_CHECKING:
     from assistant.llm.base import LLMProvider
+    from assistant.memory.store import MemoryStore
 
 
 def estimate_tokens(text: str | None) -> int:
@@ -35,9 +36,11 @@ class ConversationContext:
         self,
         max_tokens: int = 4000,
         keep_recent_turns: int = 4,
+        conversation_id: str | None = None,
     ) -> None:
         self.max_tokens = max_tokens
         self.keep_recent_turns = keep_recent_turns
+        self.conversation_id = conversation_id
         self.messages: list[Message] = []
         self.summary: str | None = None
 
@@ -57,6 +60,40 @@ class ConversationContext:
         """Xoá sạch toàn bộ lịch sử và bản tóm tắt."""
         self.messages.clear()
         self.summary = None
+
+    def load_from_store(self, store: "MemoryStore", conversation_id: str, limit: int = 50) -> None:
+        """Tải lịch sử tin nhắn từ cơ sở dữ liệu SQLite vào ngữ cảnh."""
+        self.clear()
+        self.conversation_id = conversation_id
+        db_messages = store.get_messages(conversation_id, limit=limit)
+        for row in db_messages:
+            role = row.get("role", "user")
+            content = row.get("content", "")
+            if role in ("user", "assistant", "system"):
+                self.messages.append(Message(role=role, content=content))
+
+    def get_relevant_memories(
+        self,
+        store: "MemoryStore",
+        max_tokens: int = 600,
+        max_memories: int = 15,
+    ) -> list[dict[str, Any]]:
+        """Lấy danh sách các trí nhớ dài hạn, đảm bảo không vượt quá ngân sách token quy định."""
+        all_memories = store.list_memories(limit=max_memories)
+        selected: list[dict[str, Any]] = []
+        current_tokens = 0
+
+        for mem in all_memories:
+            content = mem.get("content", "")
+            category = mem.get("category", "")
+            mem_str = f"({category}): {content}"
+            mem_tokens = estimate_tokens(mem_str) + 4
+            if current_tokens + mem_tokens > max_tokens:
+                break
+            selected.append(mem)
+            current_tokens += mem_tokens
+
+        return selected
 
     def get_messages_for_llm(self) -> list[Message]:
         """Tạo danh sách tin nhắn đã chèn bản tóm tắt (nếu có) để gửi tới LLM."""

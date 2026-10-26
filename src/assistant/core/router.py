@@ -160,25 +160,7 @@ class ModelRouter:
         is_sensitive: bool = False,
     ) -> AsyncIterator[StreamEvent]:
         """Điều phối và truyền phát luồng hội thoại theo chế độ hiện tại."""
-        # 1. Chế độ cục bộ (LOCAL)
-        if self.mode == "local":
-            self.last_provider_used = self.ollama_provider.provider_name
-            self.last_model_used = self.ollama_provider.default_model
-            async for event in self.ollama_provider.stream_chat(messages, tools, system):
-                yield event
-            return
-
-        # 2. Chế độ bắt buộc Gemini (GEMINI)
-        if self.mode == "gemini":
-            self.last_provider_used = self.gemini_provider.provider_name
-            self.last_model_used = self.gemini_provider.default_model
-            self._check_and_track_daily_limit()
-            async for event in self.gemini_provider.stream_chat(messages, tools, system):
-                yield event
-            return
-
-        # 3. Chế độ tự động (AUTO)
-        # a) Yêu cầu nhạy cảm -> chuyển thẳng sang model cục bộ
+        # 1. Yêu cầu nhạy cảm -> BẮT BUỘC dùng model cục bộ (Ollama), tuyệt đối không gửi lên Gemini
         if is_sensitive:
             self.last_provider_used = self.ollama_provider.provider_name
             self.last_model_used = self.ollama_provider.default_model
@@ -190,7 +172,25 @@ class ModelRouter:
                 yield event
             return
 
-        # b) Kiểm tra trạng thái mạng
+        # 2. Chế độ cục bộ (LOCAL)
+        if self.mode == "local":
+            self.last_provider_used = self.ollama_provider.provider_name
+            self.last_model_used = self.ollama_provider.default_model
+            async for event in self.ollama_provider.stream_chat(messages, tools, system):
+                yield event
+            return
+
+        # 3. Chế độ bắt buộc Gemini (GEMINI)
+        if self.mode == "gemini":
+            self.last_provider_used = self.gemini_provider.provider_name
+            self.last_model_used = self.gemini_provider.default_model
+            self._check_and_track_daily_limit()
+            async for event in self.gemini_provider.stream_chat(messages, tools, system):
+                yield event
+            return
+
+        # 4. Chế độ tự động (AUTO)
+        # a) Kiểm tra trạng thái mạng
         online = await self.network_checker.is_online()
         if not online:
             self.last_provider_used = self.ollama_provider.provider_name

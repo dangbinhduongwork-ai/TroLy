@@ -177,19 +177,39 @@ class GeminiProvider(LLMProvider):
             if msg.role == "system":
                 # System message sẽ được đưa vào config riêng
                 continue
-            role = "user" if msg.role == "user" else "model"
-            text_content = msg.content or ""
-            contents.append(
-                types.Content(
-                    role=role,
-                    parts=[types.Part.from_text(text=text_content)],
+
+            parts: list[types.Part] = []
+            if msg.role == "tool":
+                parts.append(
+                    types.Part.from_function_response(
+                        name=msg.tool_call_id or "tool",
+                        response={"result": msg.content or ""},
+                    )
                 )
-            )
+                contents.append(types.Content(role="user", parts=parts))
+            elif msg.tool_calls:
+                for tc in msg.tool_calls:
+                    parts.append(
+                        types.Part.from_function_call(
+                            name=tc.name,
+                            args=tc.arguments,
+                        )
+                    )
+                contents.append(types.Content(role="model", parts=parts))
+            else:
+                role = "user" if msg.role == "user" else "model"
+                parts.append(types.Part.from_text(text=msg.content or ""))
+                contents.append(types.Content(role=role, parts=parts))
 
         # 2. Cấu hình generation
         generate_config = types.GenerateContentConfig()
         if system:
             generate_config.system_instruction = system
+
+        if tools:
+            from assistant.llm.schema_adapters import to_gemini_tools
+
+            generate_config.tools = to_gemini_tools(tools)
 
         # 3. Thực hiện gọi streaming bất đồng bộ
         try:
@@ -200,9 +220,26 @@ class GeminiProvider(LLMProvider):
             )
 
             async for chunk in stream:
-                # Trích xuất văn bản từ chunk
+                # Trích xuất văn bản từ chunk nếu có
                 if chunk.text:
                     yield StreamEvent(type="text_delta", content=chunk.text)
+
+                # Trích xuất Function Calls từ chunk nếu có
+                function_calls = getattr(chunk, "function_calls", None)
+                if function_calls:
+                    from assistant.llm.base import ToolCall
+
+                    for fc in function_calls:
+                        call_id = getattr(fc, "id", None) or getattr(fc, "name", "call")
+                        args = getattr(fc, "args", {}) or {}
+                        yield StreamEvent(
+                            type="tool_call",
+                            content=ToolCall(
+                                id=str(call_id),
+                                name=getattr(fc, "name", "unknown"),
+                                arguments=dict(args),
+                            ),
+                        )
 
                 # Trích xuất usage nếu có trong metadata
                 usage_meta = getattr(chunk, "usage_metadata", None)
@@ -220,6 +257,7 @@ class GeminiProvider(LLMProvider):
                     )
 
             yield StreamEvent(type="done", content={"finish_reason": "stop"})
+
 
         except Exception as err:
             raise classify_gemini_error(err) from err

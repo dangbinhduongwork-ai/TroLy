@@ -25,7 +25,8 @@ git add .
 
 :: 4. Commit mã nguồn
 echo [4/5] Tạo commit mã nguồn...
-git commit -m "feat(llm): implement model layer, streaming, and smart router for phase 1" || git commit -m "chore: scaffold"
+git commit -m "feat(reminders): implement APScheduler, Windows toast notifications, and morning briefing for phase 4" || git commit -m "feat: phase 4 reminders"
+
 
 
 :: 5. Đẩy lên GitHub

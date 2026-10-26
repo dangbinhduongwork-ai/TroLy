@@ -28,6 +28,12 @@ from assistant.llm.base import ProviderError
 from assistant.llm.gemini_provider import GeminiProvider
 from assistant.llm.ollama_provider import OllamaProvider
 from assistant.logging_setup import setup_logging
+from assistant.memory.extractor import extract_and_store_memories
+from assistant.memory.store import MemoryStore
+from assistant.reminders.briefing import generate_morning_briefing
+from assistant.reminders.scheduler import ReminderScheduler, set_global_scheduler
+from assistant.reminders.store import ReminderStore
+from assistant.tools.reminder_tools import format_vietnamese_datetime, parse_iso_datetime
 
 
 def check_gemini_key() -> str:
@@ -216,26 +222,59 @@ def run_models() -> int:
 
 
 async def _chat_session() -> None:
-    """Phiên chat tương tác trực tiếp trên terminal với streaming."""
+    """Phiên chat tương tác trực tiếp trên terminal với streaming và trí nhớ dài hạn SQLite."""
     config = load_config(create_dirs=True)
     setup_logging(data_dir=config.data_dir, log_level=config.log_level)
 
+    store = MemoryStore(config.data_dir / "assistant.db")
+    reminder_store = ReminderStore(config.data_dir / "assistant.db")
     router = ModelRouter(config=config)
-    context = ConversationContext(max_tokens=config.max_context_tokens)
+
+    # Khởi động bộ lập lịch nhắc việc APScheduler
+    scheduler = ReminderScheduler(config=config, store=reminder_store)
+    set_global_scheduler(scheduler)
+    missed_report = scheduler.start()
+
+    # Khởi tạo cuộc hội thoại mới trong DB
+    current_conv_id = store.create_conversation(title="Cuộc trò chuyện mới", is_sensitive=False)
+    is_sensitive = False
+    context = ConversationContext(max_tokens=config.max_context_tokens, conversation_id=current_conv_id)
 
     print("=" * 65)
     print("   ỨNG DỤNG TRỢ LÝ AI TRÊN WINDOWS — TERMINAL CHAT")
     print("=" * 65)
     print("Lệnh nhanh:")
-    print("  /model <auto|gemini|local> : Đổi chế độ điều phối model")
-    print("  /clear                     : Xoá lịch sử hội thoại hiện tại")
-    print("  /exit                      : Thoát khỏi ứng dụng")
+    print("  /model <auto|gemini|local>  : Đổi chế độ điều phối model")
+    print("  /sensitive                  : Bật/tắt chế độ nhạy cảm (chỉ dùng model cục bộ)")
+    print("  /history                    : Xem và quản lý các cuộc hội thoại cũ")
+    print("  /memories                   : Liệt kê toàn bộ trí nhớ dài hạn về người dùng")
+    print("  /memory-edit <id> <nội dung>: Sửa nội dung một mục trí nhớ")
+    print("  /memory-del <id>            : Xóa một mục trí nhớ")
+    print("  /reminders                  : Xem danh sách các lời nhắc việc")
+    print("  /snooze <id> [phút]         : Hoãn lời nhắc thêm số phút (mặc định 10p)")
+    print("  /cancel <id>                : Huỷ một lời nhắc việc")
+    print("  /briefing                   : Xem bản tin sáng tổng hợp việc trong ngày")
+    print("  /clear                      : Xoá ngữ cảnh cuộc trò chuyện hiện tại")
+    print("  /exit                       : Thoát khỏi ứng dụng")
     print("-" * 65)
-    print(f"Chế độ hiện tại: [{router.mode.upper()}] (Gemini: {config.gemini_model} | Local: {config.local_model})\n")
+    print(f"Chế độ hiện tại: [{router.mode.upper()}] (Gemini: {config.gemini_model} | Local: {config.local_model})")
+    print(f"Hội thoại ID  : {current_conv_id}")
 
-    while True:
-        try:
-            user_input = input("Bạn: ").strip()
+    if missed_report:
+        print("\n" + missed_report)
+    print()
+
+
+    import assistant.tools  # noqa: F401 (Nạp toàn bộ công cụ hệ thống vào registry)
+    from assistant.core.agent_loop import AgentLoop
+
+    agent_loop = AgentLoop(router=router)
+
+    try:
+        while True:
+            try:
+                sensitive_tag = " [NHẠY CẢM]" if is_sensitive else ""
+                user_input = input(f"Bạn{sensitive_tag}: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nTạm biệt!")
             break
@@ -250,7 +289,19 @@ async def _chat_session() -> None:
 
         if user_input == "/clear":
             context.clear()
-            print("[Hệ thống] Đã xoá sạch lịch sử hội thoại.\n")
+            print("[Hệ thống] Đã xoá sạch lịch sử hội thoại hiện tại.\n")
+            continue
+
+        if user_input == "/sensitive":
+            is_sensitive = not is_sensitive
+            store.update_conversation(current_conv_id, is_sensitive=is_sensitive)
+            if is_sensitive:
+                print(
+                    "[Bảo mật] ĐÃ BẬT chế độ nhạy cảm. Mọi yêu cầu và trích xuất trí nhớ "
+                    "sẽ CHỈ dùng model cục bộ (Ollama), tuyệt đối không gửi lên đám mây.\n"
+                )
+            else:
+                print("[Bảo mật] ĐÃ TẮT chế độ nhạy cảm. Trở lại định tuyến bình thường.\n")
             continue
 
         if user_input.startswith("/model"):
@@ -263,41 +314,262 @@ async def _chat_session() -> None:
                 print("[Hướng dẫn] Cú pháp hợp lệ: /model auto | /model gemini | /model local\n")
             continue
 
-        # Thêm câu hỏi người dùng vào context
+        if user_input.startswith("/history"):
+            parts = user_input.split(maxsplit=2)
+            if len(parts) == 1:
+                convs = store.list_conversations(limit=10)
+                print("\n" + "=" * 65)
+                print("LỊCH SỬ CÁC CUỘC HỘI THOẠI GẦN ĐÂY:")
+                print("=" * 65)
+                for c in convs:
+                    cid = c["id"]
+                    marker = "[*] " if cid == current_conv_id else "    "
+                    sens_tag = " [Bảo mật: Cục bộ]" if c.get("is_sensitive") else ""
+                    print(f"{marker}ID: {cid} | Tiêu đề: {c['title']}{sens_tag}")
+                    print(f"       Cập nhật: {c['updated_at']}")
+                print("-" * 65)
+                print("Lệnh quản lý:")
+                print("  /history <id>          : Chuyển sang cuộc hội thoại có ID này")
+                print("  /history new [tiêu đề] : Tạo một cuộc hội thoại mới")
+                print("  /history del <id>      : Xóa cuộc hội thoại\n")
+            elif parts[1] == "new":
+                title = parts[2].strip() if len(parts) > 2 else "Cuộc trò chuyện mới"
+                current_conv_id = store.create_conversation(title=title, is_sensitive=is_sensitive)
+                context.clear()
+                context.conversation_id = current_conv_id
+                print(f"[Hệ thống] Đã tạo cuộc hội thoại mới: '{title}' (ID: {current_conv_id})\n")
+            elif parts[1] == "del":
+                if len(parts) < 3:
+                    print("[Hướng dẫn] Cú pháp: /history del <id>\n")
+                else:
+                    target_id = parts[2].strip()
+                    if store.delete_conversation(target_id):
+                        print(f"[Hệ thống] Đã xóa thành công cuộc hội thoại: {target_id}\n")
+                        if target_id == current_conv_id:
+                            current_conv_id = store.create_conversation(
+                                title="Cuộc trò chuyện mới", is_sensitive=is_sensitive
+                            )
+                            context.clear()
+                            context.conversation_id = current_conv_id
+                    else:
+                        print(f"[Lỗi] Không tìm thấy hoặc không thể xóa hội thoại ID: {target_id}\n")
+            else:
+                target_id = parts[1].strip()
+                conv = store.get_conversation(target_id)
+                if conv:
+                    current_conv_id = target_id
+                    is_sensitive = bool(conv.get("is_sensitive", 0))
+                    context.load_from_store(store, current_conv_id)
+                    print(
+                        f"[Hệ thống] Đã chuyển sang hội thoại '{conv['title']}' "
+                        f"(ID: {target_id}, {len(context.messages)} tin nhắn).\n"
+                    )
+                else:
+                    print(f"[Lỗi] Không tìm thấy cuộc hội thoại với ID: {target_id}\n")
+            continue
+
+        if user_input == "/memories":
+            all_mems = store.list_memories(limit=50)
+            print("\n" + "=" * 65)
+            print(f"DANH SÁCH TRÍ NHỚ DÀI HẠN VỀ NGƯỜI DÙNG ({len(all_mems)} mục):")
+            print("=" * 65)
+            if not all_mems:
+                print("  (Chưa có ghi nhớ nào được lưu. Bạn có thể nói 'Hãy nhớ tôi thích...')")
+            else:
+                for idx, m in enumerate(all_mems, start=1):
+                    print(f"{idx}. [{m['category']}] {m['content']}")
+                    print(f"   ID: {m['id']} | Cập nhật: {m['updated_at']}")
+            print("-" * 65)
+            print("Lệnh quản lý:")
+            print("  /memory-edit <id> <nội dung mới> : Sửa nội dung trí nhớ")
+            print("  /memory-del <id>                 : Xóa mục trí nhớ\n")
+            continue
+
+        if user_input.startswith("/memory-edit"):
+            parts = user_input.split(maxsplit=2)
+            if len(parts) < 3:
+                print("[Hướng dẫn] Cú pháp: /memory-edit <id> <nội dung mới>\n")
+            else:
+                target_id = parts[1].strip()
+                new_content = parts[2].strip()
+                if store.update_memory(target_id, content=new_content):
+                    print(f"[Thành công] Đã cập nhật trí nhớ ID '{target_id}': {new_content}\n")
+                else:
+                    print(f"[Lỗi] Không tìm thấy mục trí nhớ với ID: {target_id}\n")
+            continue
+
+        if user_input.startswith("/memory-del"):
+            parts = user_input.split(maxsplit=1)
+            if len(parts) < 2:
+                print("[Hướng dẫn] Cú pháp: /memory-del <id>\n")
+            else:
+                target_id = parts[1].strip()
+                if store.delete_memory(target_id):
+                    print(f"[Thành công] Đã xóa mục trí nhớ ID: {target_id}\n")
+                else:
+                    print(f"[Lỗi] Không tìm thấy mục trí nhớ với ID: {target_id}\n")
+            continue
+
+        if user_input == "/reminders":
+            rems = reminder_store.list_reminders(limit=25)
+            print("\n" + "=" * 65)
+            print(f"DANH SÁCH CÁC LỜI NHẮC VIỆC GẦN ĐÂY ({len(rems)} mục):")
+            print("=" * 65)
+            if not rems:
+                print("  (Hiện chưa có lời nhắc việc nào. Bạn có thể nói 'Nhắc tôi họp lúc 15h...')")
+            else:
+                status_map = {
+                    "pending": "Đang chờ",
+                    "fired": "Đã nhắc",
+                    "snoozed": "Đang hoãn",
+                    "cancelled": "Đã huỷ",
+                    "missed": "Bị lỡ",
+                }
+                for r in rems:
+                    try:
+                        dt = parse_iso_datetime(r["trigger_at"], config.timezone)
+                        t_str = format_vietnamese_datetime(dt)
+                    except Exception:
+                        t_str = r["trigger_at"]
+                    cron_info = f" [Lặp lại: {r['cron_expr']}]" if r.get("cron_expr") else ""
+                    st = status_map.get(r["status"], r["status"])
+                    print(f"[{st}] ID: {r['id']}")
+                    print(f"       Thời gian: {t_str}{cron_info}")
+                    print(f"       Nội dung : {r['message']}")
+            print("-" * 65)
+            print("Lệnh quản lý: /snooze <id> [phút] | /cancel <id>\n")
+            continue
+
+        if user_input.startswith("/snooze"):
+            parts = user_input.split()
+            if len(parts) < 2:
+                print("[Hướng dẫn] Cú pháp: /snooze <id> [số_phút]\n")
+            else:
+                target_id = parts[1].strip()
+                mins = 10
+                if len(parts) >= 3:
+                    try:
+                        mins = int(parts[2])
+                    except ValueError:
+                        mins = 10
+                updated = reminder_store.snooze_reminder(
+                    target_id, minutes=mins, timezone_str=config.timezone
+                )
+                if updated:
+                    scheduler.schedule_reminder(updated)
+                    try:
+                        dt = parse_iso_datetime(updated["trigger_at"], config.timezone)
+                        t_str = format_vietnamese_datetime(dt)
+                    except Exception:
+                        t_str = updated["trigger_at"]
+                    print(
+                        f"[Thành công] Đã hoãn lời nhắc thêm {mins} phút. "
+                        f"Sẽ nhắc lại vào lúc {t_str}: \"{updated['message']}\"\n"
+                    )
+                else:
+                    print(f"[Lỗi] Không tìm thấy lời nhắc với ID: {target_id}\n")
+            continue
+
+        if user_input.startswith("/cancel"):
+            parts = user_input.split()
+            if len(parts) < 2:
+                print("[Hướng dẫn] Cú pháp: /cancel <id>\n")
+            else:
+                target_id = parts[1].strip()
+                if reminder_store.cancel_reminder(target_id):
+                    scheduler.cancel_scheduled_job(target_id)
+                    print(f"[Thành công] Đã huỷ lời nhắc ID: {target_id}\n")
+                else:
+                    print(f"[Lỗi] Không tìm thấy lời nhắc với ID: {target_id}\n")
+            continue
+
+        if user_input == "/briefing":
+            print("\n[Hệ thống] Đang tạo bản tin sáng...")
+            briefing_text = await generate_morning_briefing(
+                router=router,
+                store=reminder_store,
+                timezone_str=config.timezone,
+            )
+            print("\n" + briefing_text + "\n")
+            continue
+
+
+        # Cập nhật tiêu đề hội thoại nếu là tin nhắn đầu tiên
+        curr_conv = store.get_conversation(current_conv_id)
+        if curr_conv and curr_conv.get("title") == "Cuộc trò chuyện mới":
+            new_title = user_input[:40].replace("\n", " ").strip()
+            store.update_conversation(current_conv_id, title=new_title)
+
+        # Lưu tin nhắn người dùng vào SQLite và context
+        store.add_message(conversation_id=current_conv_id, role="user", content=user_input)
         context.add_user_message(user_input)
 
         # Kiểm tra nén ngữ cảnh nếu vượt ngưỡng token
         await context.check_and_compress(local_provider=router.ollama_provider)
 
-        # Chuẩn bị gọi mô hình
-        sys_prompt = get_system_prompt(timezone_str=config.timezone)
-        messages_to_send = context.get_messages_for_llm()
+        # Tự động chèn các trí nhớ quan trọng vào system prompt
+        active_memories = context.get_relevant_memories(store, max_tokens=600, max_memories=15)
+        sys_prompt = get_system_prompt(
+            timezone_str=config.timezone,
+            memories=active_memories,
+        )
 
         print("Trợ lý: ", end="", flush=True)
 
-        full_response_chunks: list[str] = []
+        accumulated_text_chunks: list[str] = []
         try:
-            async for event in router.stream_chat(
-                messages=messages_to_send,
-                system=sys_prompt,
+            async for event in agent_loop.run_turn(
+                context=context,
+                system_prompt=sys_prompt,
+                is_sensitive=is_sensitive,
             ):
                 if event.type == "text_delta" and isinstance(event.content, str):
                     sys.stdout.write(event.content)
                     sys.stdout.flush()
-                    full_response_chunks.append(event.content)
+                    accumulated_text_chunks.append(event.content)
 
-            print()  # Xuống dòng sau khi stream hoàn tất
-            full_response = "".join(full_response_chunks).strip()
-            context.add_assistant_message(full_response)
+            print()  # Xuống dòng sau khi hoàn tất lượt
 
-            # In thông tin model đã phục vụ lượt trả lời này
+            full_response = "".join(accumulated_text_chunks).strip()
             model_info = router.last_model_used or router.mode
             print(f"[Nguồn: {router.last_provider_used.upper()} ({model_info})]\n")
 
+            # Lưu phản hồi của trợ lý vào SQLite
+            if full_response:
+                store.add_message(
+                    conversation_id=current_conv_id,
+                    role="assistant",
+                    content=full_response,
+                    model_used=f"{router.last_provider_used}:{model_info}",
+                )
+
+                # Tự động trích xuất trí nhớ dài hạn (tuân thủ nguyên tắc an toàn: sensitive -> local only)
+                try:
+                    extracted = await extract_and_store_memories(
+                        user_message=user_input,
+                        assistant_response=full_response,
+                        store=store,
+                        router=router,
+                        is_sensitive=is_sensitive,
+                        source_conv_id=current_conv_id,
+                    )
+                    if extracted:
+                        for ext in extracted:
+                            label = "Đã lưu trí nhớ" if ext["action"] == "created" else "Đã cập nhật trí nhớ"
+                            print(f"💡 [{label}: ({ext['category']}) {ext['content']}]")
+                        print()
+                except Exception:
+                    pass
+
         except ProviderError as err:
             print(f"\n[LỖI TRỢ LÝ] {err.message}\n")
+
         except Exception as err:
             print(f"\n[LỖI KHÔNG MONG MUỐN] Đã xảy ra lỗi: {err}\n")
+    finally:
+        scheduler.shutdown()
+        set_global_scheduler(None)
+
 
 
 def run_chat() -> int:

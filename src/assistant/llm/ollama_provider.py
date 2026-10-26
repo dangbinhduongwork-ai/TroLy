@@ -85,13 +85,32 @@ class OllamaProvider(LLMProvider):
 
         for msg in messages:
             msg_dict: dict[str, Any] = {"role": msg.role, "content": msg.content or ""}
+            if msg.role == "tool":
+                msg_dict["tool_call_id"] = msg.tool_call_id or "call"
+            elif msg.tool_calls:
+                msg_dict["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
             formatted_messages.append(msg_dict)
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": self._model_name,
             "messages": formatted_messages,
             "stream": True,
         }
+
+        if tools:
+            from assistant.llm.schema_adapters import to_ollama_tools
+
+            payload["tools"] = to_ollama_tools(tools)
 
         url = f"{self._host}/v1/chat/completions"
 
@@ -113,6 +132,9 @@ class OllamaProvider(LLMProvider):
                             message=f"Ollama trả về lỗi {response.status_code}: {body.decode(errors='ignore')}",
                         )
 
+                    # Biến lưu trữ ghép nối tool call arguments dở dang trong luồng stream
+                    accumulated_tool_calls: dict[int, dict[str, Any]] = {}
+
                     async for line in response.aiter_lines():
                         line = line.strip()
                         if not line or not line.startswith("data:"):
@@ -120,6 +142,26 @@ class OllamaProvider(LLMProvider):
 
                         data_str = line.removeprefix("data:").strip()
                         if data_str == "[DONE]":
+                            # Phát ra các tool call đã gom xong nếu có
+                            if accumulated_tool_calls:
+                                from assistant.llm.base import ToolCall
+
+                                for tc_dict in accumulated_tool_calls.values():
+                                    raw_args = tc_dict.get("arguments", "{}")
+                                    try:
+                                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                                    except Exception:
+                                        parsed_args = {}
+                                    yield StreamEvent(
+                                        type="tool_call",
+                                        content=ToolCall(
+                                            id=tc_dict.get("id") or "call",
+                                            name=tc_dict.get("name") or "unknown",
+                                            arguments=parsed_args,
+                                        ),
+                                    )
+                                accumulated_tool_calls.clear()
+
                             yield StreamEvent(type="done", content={"finish_reason": "stop"})
                             break
 
@@ -128,9 +170,28 @@ class OllamaProvider(LLMProvider):
                             choices = chunk.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
+
+                                # Văn bản thường
                                 text_chunk = delta.get("content")
                                 if text_chunk:
                                     yield StreamEvent(type="text_delta", content=text_chunk)
+
+                                # Lệnh gọi công cụ (Tool Calls)
+                                delta_tool_calls = delta.get("tool_calls")
+                                if delta_tool_calls:
+                                    for tc_item in delta_tool_calls:
+                                        idx = tc_item.get("index", 0)
+                                        if idx not in accumulated_tool_calls:
+                                            accumulated_tool_calls[idx] = {
+                                                "id": tc_item.get("id", f"call_{idx}"),
+                                                "name": "",
+                                                "arguments": "",
+                                            }
+                                        fn_data = tc_item.get("function", {})
+                                        if fn_data.get("name"):
+                                            accumulated_tool_calls[idx]["name"] = fn_data["name"]
+                                        if fn_data.get("arguments"):
+                                            accumulated_tool_calls[idx]["arguments"] += fn_data["arguments"]
 
                             # Trích xuất usage nếu có
                             usage_data = chunk.get("usage")
@@ -145,6 +206,7 @@ class OllamaProvider(LLMProvider):
                                 )
                         except json.JSONDecodeError:
                             continue
+
 
         except httpx.ConnectError as err:
             raise ProviderError(

@@ -26,6 +26,7 @@ class Config:
     network_cache_seconds: int
     ui_port: int
     log_level: str
+    telegram_chat_id: str = ""
 
 
 
@@ -91,6 +92,7 @@ def load_config(
     general_sec = toml_data.get("general", {})
     models_sec = toml_data.get("models", {})
     server_sec = toml_data.get("server", {})
+    notifications_sec = toml_data.get("notifications", {})
 
     # 1. workspace_dir
     ws_raw = os.getenv("WORKSPACE_DIR") or general_sec.get("workspace_dir") or "C:\\AI_Workspace"
@@ -146,6 +148,11 @@ def load_config(
     # 6. log_level
     log_level = (os.getenv("LOG_LEVEL") or general_sec.get("log_level") or "INFO").upper()
 
+    # 7. telegram_chat_id
+    telegram_chat_id = str(
+        os.getenv("TELEGRAM_CHAT_ID") or notifications_sec.get("telegram_chat_id") or ""
+    ).strip()
+
     config = Config(
         workspace_dir=workspace_path,
         data_dir=data_path,
@@ -158,6 +165,7 @@ def load_config(
         network_cache_seconds=network_cache_seconds,
         ui_port=ui_port,
         log_level=log_level,
+        telegram_chat_id=telegram_chat_id,
     )
 
 

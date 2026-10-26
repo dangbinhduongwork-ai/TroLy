@@ -71,3 +71,42 @@ def test_get_system_prompt_has_datetime_and_timezone() -> None:
     assert "[THÔNG TIN HỆ THỐNG]" in prompt
     assert "Múi giờ: Asia/Ho_Chi_Minh" in prompt
     assert "Thời gian hiện tại:" in prompt
+
+
+def test_get_system_prompt_with_memories() -> None:
+    """Kiểm tra system prompt tự động chèn trí nhớ dài hạn của người dùng."""
+    memories = [
+        {"category": "naming_rule", "content": "Quy tắc đặt tên file YYYY-MM-DD"},
+        {"category": "preference", "content": "Thích dùng dark mode"},
+    ]
+    prompt = get_system_prompt(memories=memories)
+    assert "[TRÍ NHỚ DÀI HẠN VỀ NGƯỜI DÙNG]" in prompt
+    assert "(naming_rule): Quy tắc đặt tên file YYYY-MM-DD" in prompt
+    assert "(preference): Thích dùng dark mode" in prompt
+
+
+def test_context_load_from_store_and_memories_budget(tmp_path) -> None:
+    """Kiểm tra tải lịch sử từ SQLite và lấy trí nhớ theo ngân sách token."""
+    from assistant.memory.store import MemoryStore
+
+    db_path = tmp_path / "context_test.db"
+    store = MemoryStore(db_path=db_path)
+
+    cid = store.create_conversation("Hội thoại kiểm thử")
+    store.add_message(cid, "user", "Tin nhắn cũ 1")
+    store.add_message(cid, "assistant", "Tin nhắn phản hồi 1")
+
+    # 1. Tải vào context
+    ctx = ConversationContext()
+    ctx.load_from_store(store, cid)
+    assert len(ctx.messages) == 2
+    assert ctx.messages[0].content == "Tin nhắn cũ 1"
+
+    # 2. Thêm nhiều trí nhớ và kiểm tra giới hạn token
+    for i in range(10):
+        store.add_memory("preference", f"Sở thích người dùng số {i}: {('rất thích ' * 20)}")
+
+    relevant = ctx.get_relevant_memories(store, max_tokens=100)
+    # Vì mỗi memory khá dài, ngân sách 100 token sẽ chỉ lấy được số lượng hạn chế
+    assert len(relevant) < 10
+

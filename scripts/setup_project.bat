@@ -20,7 +20,7 @@ if not exist ".venv" (
     echo    .venv da ton tai, bo qua buoc tao.
 )
 
-echo 3. Cai dat / Cap nhat goi assistant va cac thu vien Giai doan 1...
+echo 3. Cai dat / Cap nhat goi assistant va cac thu vien Giai doan 2 (send2trash, pydantic, google-genai)...
 call .venv\Scripts\activate.bat
 pip install -e ".[dev]"
 if %ERRORLEVEL% neq 0 (
@@ -39,13 +39,13 @@ echo 6. Kiem tra ma nguon bang ruff...
 ruff check .
 
 echo ========================================================
-echo  HOAN TAT KIEM TRA GIAI DOAN 1 THANH CONG!
+echo  HOAN TAT KIEM TRA GIAI DOAN 2 THANH CONG!
 echo ========================================================
 echo.
-echo Ban co the chay thu cac lenh:
-echo   - assistant set-key   (de luu Gemini API Key)
-echo   - assistant models    (de xem danh sach cac model)
-echo   - assistant chat      (de bat dau tro chuyen terminal)
+echo Ban co the chay thu cac tinh nang moi:
+echo   - assistant chat      (Tro chuyen, tao file, mo app, chay lenh co xac nhan)
+echo   - python scripts\check_tool_calling.py --model qwen2.5:7b (Kiem tra tool calling cua model)
 echo ========================================================
 pause
+
 
