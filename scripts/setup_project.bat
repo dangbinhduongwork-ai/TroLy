@@ -20,7 +20,7 @@ if not exist ".venv" (
     echo    .venv da ton tai, bo qua buoc tao.
 )
 
-echo 3. Cai dat goi assistant o che do editable va dev dependencies...
+echo 3. Cai dat / Cap nhat goi assistant va cac thu vien Giai doan 1...
 call .venv\Scripts\activate.bat
 pip install -e ".[dev]"
 if %ERRORLEVEL% neq 0 (
@@ -32,13 +32,20 @@ if %ERRORLEVEL% neq 0 (
 echo 4. Chay kiem tra chan doan he thong (assistant doctor)...
 assistant doctor
 
-echo 5. Chay kiem thu tu dong (pytest)...
-pytest
+echo 5. Chay kiem thu tu dong toan bo cac module (pytest -v)...
+pytest -v
 
 echo 6. Kiem tra ma nguon bang ruff...
 ruff check .
 
 echo ========================================================
-echo  HOAN TAT GIAI DOAN 0 THANH CONG!
+echo  HOAN TAT KIEM TRA GIAI DOAN 1 THANH CONG!
+echo ========================================================
+echo.
+echo Ban co the chay thu cac lenh:
+echo   - assistant set-key   (de luu Gemini API Key)
+echo   - assistant models    (de xem danh sach cac model)
+echo   - assistant chat      (de bat dau tro chuyen terminal)
 echo ========================================================
 pause
+

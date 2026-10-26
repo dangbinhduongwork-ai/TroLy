@@ -56,10 +56,40 @@ assistant doctor
 
 ---
 
-### Bước 5: Chạy kiểm thử tự động và kiểm tra mã sạch
+### Bước 5: Cài đặt khóa Gemini API (Tùy chọn)
+Nhập khóa API ẩn ký tự và lưu vào Windows Credential Manager:
+```powershell
+assistant set-key
+```
+
+---
+
+### Bước 6: Xem danh sách các mô hình khả dụng
+Liệt kê các model Gemini trên đám mây và Ollama trên máy:
+```powershell
+assistant models
+```
+
+---
+
+### Bước 7: Trò chuyện tương tác trên Terminal (Streaming)
+Khởi động giao diện chat:
+```powershell
+assistant chat
+```
+Trong phiên chat, bạn có thể gõ:
+- `/model auto`: Tự động chọn model (Gemini khi có mạng, Ollama khi mất mạng hoặc nhạy cảm).
+- `/model gemini`: Ép buộc sử dụng Gemini.
+- `/model local`: Ép buộc sử dụng mô hình Ollama cục bộ trên máy.
+- `/clear`: Xóa lịch sử hội thoại hiện tại.
+- `/exit`: Thoát khỏi ứng dụng.
+
+---
+
+### Bước 8: Chạy kiểm thử tự động và kiểm tra mã sạch
 Chạy unit test:
 ```powershell
-pytest
+pytest -v
 ```
 
 Kiểm tra cú pháp linter bằng `ruff`:
@@ -67,14 +97,6 @@ Kiểm tra cú pháp linter bằng `ruff`:
 ruff check .
 ```
 
----
-
-### Bước 6: Khởi tạo Git và thực hiện commit đầu tiên
-```powershell
-git init
-git add .
-git commit -m "chore: scaffold"
-```
 
 ---
 

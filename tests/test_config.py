@@ -34,9 +34,14 @@ ui_port = 8888
     assert config.timezone == "Asia/Ho_Chi_Minh"
     assert config.gemini_model == "gemini-2.5-flash"
     assert config.local_model == "qwen2.5:7b"
+    assert config.ollama_host == "http://127.0.0.1:11434"
+    assert config.daily_soft_limit == 1000
+    assert config.max_context_tokens == 4000
+    assert config.network_cache_seconds == 10
     assert config.ui_port == 8888
     assert config.log_level == "DEBUG"
     assert config.workspace_dir == Path("C:/CustomWorkspace").resolve()
+
 
 
 def test_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

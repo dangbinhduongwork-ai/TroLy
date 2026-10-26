@@ -20,8 +20,13 @@ class Config:
     timezone: str
     gemini_model: str
     local_model: str
+    ollama_host: str
+    daily_soft_limit: int
+    max_context_tokens: int
+    network_cache_seconds: int
     ui_port: int
     log_level: str
+
 
 
 def _get_default_data_dir() -> Path:
@@ -106,6 +111,30 @@ def load_config(
         os.getenv("GEMINI_MODEL") or models_sec.get("gemini_model") or "gemini-2.5-flash"
     )
     local_model = os.getenv("LOCAL_MODEL") or models_sec.get("local_model") or "qwen2.5:7b"
+    ollama_host = (
+        os.getenv("OLLAMA_HOST") or models_sec.get("ollama_host") or "http://127.0.0.1:11434"
+    )
+
+    try:
+        daily_soft_limit = int(
+            os.getenv("DAILY_SOFT_LIMIT") or models_sec.get("daily_soft_limit") or 1000
+        )
+    except (ValueError, TypeError):
+        daily_soft_limit = 1000
+
+    try:
+        max_context_tokens = int(
+            os.getenv("MAX_CONTEXT_TOKENS") or models_sec.get("max_context_tokens") or 4000
+        )
+    except (ValueError, TypeError):
+        max_context_tokens = 4000
+
+    try:
+        network_cache_seconds = int(
+            os.getenv("NETWORK_CACHE_SECONDS") or models_sec.get("network_cache_seconds") or 10
+        )
+    except (ValueError, TypeError):
+        network_cache_seconds = 10
 
     # 5. ui_port
     port_raw = os.getenv("UI_PORT") or server_sec.get("ui_port") or 8000
@@ -123,9 +152,14 @@ def load_config(
         timezone=timezone,
         gemini_model=gemini_model,
         local_model=local_model,
+        ollama_host=ollama_host,
+        daily_soft_limit=daily_soft_limit,
+        max_context_tokens=max_context_tokens,
+        network_cache_seconds=network_cache_seconds,
         ui_port=ui_port,
         log_level=log_level,
     )
+
 
     if create_dirs:
         try:

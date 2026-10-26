@@ -21,6 +21,19 @@ gemini_model = "gemini-2.5-flash"
 # Model cục bộ chạy qua Ollama (khi mất mạng hoặc dữ liệu nhạy cảm)
 local_model = "qwen2.5:7b"
 
+# Địa chỉ máy chủ Ollama
+ollama_host = "http://127.0.0.1:11434"
+
+# Ngưỡng cảnh báo số request Gemini mỗi ngày
+daily_soft_limit = 1000
+
+# Ngân sách token cho cửa sổ ngữ cảnh hội thoại
+max_context_tokens = 4000
+
+# Thời gian lưu cache trạng thái kết nối mạng (giây)
+network_cache_seconds = 10
+
 [server]
 # Cổng web UI cục bộ
 ui_port = 8000
+
