@@ -3,13 +3,22 @@
 Tự động nạp toàn bộ các công cụ đã đăng ký.
 """
 
+from assistant.agents.orchestrator import delegate_to_agent
 from assistant.tools.apps import open_app, open_path, open_url
+from assistant.tools.docs import (
+    create_docx,
+    create_excel,
+    read_docx,
+    read_excel,
+    read_pdf,
+)
 from assistant.tools.files import (
     append_file,
     delete_path,
     list_dir,
     make_dir,
     move_path,
+    organize_directory,
     read_text_file,
     rename_path,
     search_files,
@@ -25,6 +34,7 @@ from assistant.tools.reminder_tools import (
 )
 from assistant.tools.shell import run_command
 from assistant.tools.system import get_system_info
+from assistant.tools.web import fetch_webpage
 
 __all__ = [
     "default_tool_registry",
@@ -38,6 +48,7 @@ __all__ = [
     "rename_path",
     "search_files",
     "delete_path",
+    "organize_directory",
     "open_path",
     "open_url",
     "open_app",
@@ -50,6 +61,14 @@ __all__ = [
     "list_reminders",
     "cancel_reminder",
     "snooze_reminder",
+    "read_pdf",
+    "read_docx",
+    "read_excel",
+    "create_docx",
+    "create_excel",
+    "fetch_webpage",
+    "delegate_to_agent",
 ]
+
 
 

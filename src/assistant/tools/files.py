@@ -4,7 +4,9 @@ Tất cả các đường dẫn đều được resolve và kiểm tra an toàn 
 Mỗi công cụ trả về cấu trúc chuẩn: {"ok": bool, "data": Any, "error": str | None, "truncated": bool}.
 """
 
+from datetime import datetime
 from pathlib import Path
+import shutil
 from typing import Any
 import send2trash
 
@@ -234,3 +236,142 @@ def delete_path(path: str) -> dict[str, Any]:
         }
     except Exception as err:
         return {"ok": False, "data": None, "error": str(err), "truncated": False}
+
+
+EXTENSION_CATEGORIES: dict[str, str] = {
+    # Tài liệu
+    ".pdf": "Documents",
+    ".docx": "Documents",
+    ".doc": "Documents",
+    ".xlsx": "Documents",
+    ".xls": "Documents",
+    ".pptx": "Documents",
+    ".ppt": "Documents",
+    ".txt": "Documents",
+    ".csv": "Documents",
+    ".md": "Documents",
+    # Hình ảnh
+    ".jpg": "Images",
+    ".jpeg": "Images",
+    ".png": "Images",
+    ".gif": "Images",
+    ".webp": "Images",
+    ".svg": "Images",
+    ".bmp": "Images",
+    ".ico": "Images",
+    # Mã nguồn
+    ".py": "Code",
+    ".js": "Code",
+    ".ts": "Code",
+    ".html": "Code",
+    ".css": "Code",
+    ".json": "Code",
+    ".toml": "Code",
+    ".yaml": "Code",
+    ".yml": "Code",
+    ".bat": "Code",
+    ".ps1": "Code",
+    # Nén
+    ".zip": "Archives",
+    ".rar": "Archives",
+    ".7z": "Archives",
+    ".tar": "Archives",
+    ".gz": "Archives",
+    # Media
+    ".mp3": "Media",
+    ".wav": "Media",
+    ".mp4": "Media",
+    ".mkv": "Media",
+}
+
+
+@register_tool(
+    name="organize_directory",
+    description=(
+        "Quét và sắp xếp các file trong thư mục theo loại phần mở rộng (by_extension) "
+        "hoặc theo tháng chỉnh sửa (by_date). Mặc định execute=False trả về kế hoạch di chuyển; "
+        "khi execute=True mới thực hiện di chuyển file (mức CONFIRM)."
+    ),
+    permission_level=PermissionLevel.CONFIRM,
+)
+def organize_directory(
+    directory_path: str = ".",
+    strategy: str = "by_extension",
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Phân loại và sắp xếp các tập tin trong thư mục."""
+    try:
+        resolved = resolve_in_workspace(directory_path)
+        if not resolved.exists() or not resolved.is_dir():
+            return {
+                "ok": False,
+                "data": None,
+                "error": f"Thư mục không tồn tại: {directory_path}",
+                "truncated": False,
+            }
+
+        plan: list[dict[str, str]] = []
+        files = [f for f in resolved.iterdir() if f.is_file()]
+
+        for f in files:
+            ext = f.suffix.lower()
+            if strategy == "by_date":
+                mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                subfolder = mtime.strftime("%Y-%m")
+            else:
+                subfolder = EXTENSION_CATEGORIES.get(ext, "Others")
+
+            target_folder = resolved / subfolder
+            target_file = target_folder / f.name
+
+            plan.append({
+                "file_name": f.name,
+                "source": str(f.relative_to(resolved)),
+                "target_folder": subfolder,
+                "target_path": str(target_file.relative_to(resolved)),
+            })
+
+        if not execute:
+            return {
+                "ok": True,
+                "data": {
+                    "directory": directory_path,
+                    "strategy": strategy,
+                    "total_files": len(plan),
+                    "plan": plan,
+                    "summary": (
+                        f"Kế hoạch sắp xếp {len(plan)} file trong '{directory_path}' "
+                        f"theo chiến lược '{strategy}'. Hãy gọi lại với execute=True để thực thi."
+                    ),
+                },
+                "error": None,
+                "truncated": False,
+            }
+
+        # Thực thi kế hoạch di chuyển file
+        moved_count = 0
+        for item in plan:
+            src_path = resolved / item["source"]
+            dst_folder = resolved / item["target_folder"]
+            dst_folder.mkdir(parents=True, exist_ok=True)
+            dst_path = resolved / item["target_path"]
+
+            # Tránh ghi đè nếu trùng tên
+            if dst_path.exists() and dst_path != src_path:
+                stem = dst_path.stem
+                suffix = dst_path.suffix
+                dst_path = dst_folder / f"{stem}_duplicate_{datetime.now().strftime('%H%M%S')}{suffix}"
+
+            if src_path != dst_path:
+                shutil.move(str(src_path), str(dst_path))
+                moved_count += 1
+
+        return {
+            "ok": True,
+            "data": f"Đã sắp xếp thành công {moved_count}/{len(plan)} file trong thư mục '{directory_path}'.",
+            "error": None,
+            "truncated": False,
+        }
+    except Exception as err:
+        return {"ok": False, "data": None, "error": str(err), "truncated": False}
+

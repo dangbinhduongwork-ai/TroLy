@@ -125,17 +125,36 @@ Thử nghiệm hệ thống nhắc việc đúng giờ (chạy thuần APSchedul
 
 ---
 
-### Bước 10: Kiểm định khả năng gọi công cụ của Model
+### Bước 10: Xử Lý Tài Liệu và Uỷ Quyền Cho Các Agent Chuyên Trách
+Thử nghiệm xử lý tài liệu văn phòng và phân loại dọn dẹp thư mục:
+1. Bạn gõ: `Tạo cho tôi file Excel danh sách chi tiêu mẫu trong workspace`
+   -> AI gọi công cụ `create_excel` tạo file `.xlsx`.
+2. Bạn gõ: `Tóm tắt file Word/PDF này giúp tôi`
+   -> AI gọi `read_docx` hoặc `read_pdf`, bọc dữ liệu trong thẻ an toàn `<untrusted_content>` và tóm tắt.
+3. Bạn gõ: `Phân loại các file trong thư mục X theo loại file`
+   -> AI gọi `organize_directory` lập kế hoạch di chuyển trước và hỏi bạn duyệt `(y/N)`.
+4. Khi tác vụ phức tạp nhiều bước, AI tự động uỷ quyền cho 1 trong 4 Agent chuyên trách:
+   - `file_organizer_agent`: Chuyên dọn dẹp, sắp xếp thư mục.
+   - `document_agent`: Chuyên xử lý tài liệu PDF, Word, Excel.
+   - `research_agent`: Chuyên tra cứu web an toàn (chống SSRF, không có quyền xóa/chạy lệnh).
+   - `coder_agent`: Chuyên viết code và chạy lệnh kiểm thử trong workspace.
+5. Chạy kịch bản kiểm tra toàn diện:
+   ```powershell
+   python scripts/test_agents_flow.py
+   ```
+
+---
+
+### Bước 11: Kiểm định khả năng gọi công cụ của Model
 Chạy script kiểm tra xem mô hình có gọi đúng công cụ tạo file hay không:
 ```powershell
 python scripts/check_tool_calling.py --model qwen2.5:7b
 python scripts/check_tool_calling.py --model gemini-2.5-flash --provider gemini
 ```
 
-
 ---
 
-### Bước 9: Chạy kiểm thử tự động và kiểm tra mã sạch
+### Bước 12: Chạy kiểm thử tự động và kiểm tra mã sạch
 Chạy bộ unit test toàn diện:
 ```powershell
 pytest -v
@@ -145,6 +164,7 @@ Kiểm tra cú pháp linter bằng `ruff`:
 ```powershell
 ruff check .
 ```
+
 
 
 

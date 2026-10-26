@@ -27,6 +27,7 @@ from assistant.core.router import ModelRouter, RouterMode
 from assistant.llm.base import ProviderError
 from assistant.llm.gemini_provider import GeminiProvider
 from assistant.llm.ollama_provider import OllamaProvider
+from assistant.agents.orchestrator import set_orchestrator_router
 from assistant.logging_setup import setup_logging
 from assistant.memory.extractor import extract_and_store_memories
 from assistant.memory.store import MemoryStore
@@ -34,6 +35,7 @@ from assistant.reminders.briefing import generate_morning_briefing
 from assistant.reminders.scheduler import ReminderScheduler, set_global_scheduler
 from assistant.reminders.store import ReminderStore
 from assistant.tools.reminder_tools import format_vietnamese_datetime, parse_iso_datetime
+
 
 
 def check_gemini_key() -> str:
@@ -229,6 +231,7 @@ async def _chat_session() -> None:
     store = MemoryStore(config.data_dir / "assistant.db")
     reminder_store = ReminderStore(config.data_dir / "assistant.db")
     router = ModelRouter(config=config)
+    set_orchestrator_router(router)
 
     # Khởi động bộ lập lịch nhắc việc APScheduler
     scheduler = ReminderScheduler(config=config, store=reminder_store)

@@ -83,5 +83,30 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   - `apscheduler>=3.10.4,<4.0.0`: Lập lịch bất đồng bộ trong asyncio event loop.
   - `winotify>=1.1.0`: Hiển thị thông báo Toast Windows 10/11 kèm âm thanh không cần quyền Admin.
 
+### [2026-10-26] Giai đoạn 5: Công cụ tài liệu và Các Agent chuyên trách (Multi-Agent Architecture)
+- **Bối cảnh**: Cần mở rộng năng lực xử lý tài liệu văn phòng (PDF, Word, Excel), tự động hóa dọn dẹp thư mục, tra cứu web an toàn, và xây dựng cơ chế điều phối đa agent chuyên trách với quyền hạn tối thiểu riêng biệt.
+- **Phương án đã chọn**:
+  1. **Không dùng framework cồng kềnh**: Loại bỏ hoàn toàn các framework phức tạp (như LangChain, CrewAI, AutoGen). Mỗi Agent chuyên trách thực chất là một cấu hình `AgentSpec` gồm: tên vai trò, system prompt chuyên sâu, và danh sách công cụ được phép gọi `allowed_tools` (tuân thủ triệt để Nguyên tắc 11).
+  2. **Thư viện xử lý tài liệu văn phòng**:
+     - `pypdf>=4.0.0`: Đọc và trích xuất text từ PDF thuần Python, không cần cài thêm công cụ ngoài như poppler.
+     - `python-docx>=1.1.0`: Đọc và tạo file Word (.docx) chuẩn cấu trúc đoạn văn bản và bảng.
+     - `openpyxl>=3.1.0`: Đọc và tạo bảng tính Excel (.xlsx) đa sheet.
+  3. **Công cụ dọn dẹp thư mục `organize_directory`**: Hỗ trợ phân loại theo phần mở rộng (`by_extension`) hoặc tháng sửa đổi (`by_date`). Mặc định `execute=False` trả về kế hoạch để người dùng xem trước; chỉ khi `execute=True` mới thực hiện di chuyển (mức `CONFIRM`).
+  4. **Công cụ tra cứu web `fetch_webpage` & Phòng chống SSRF**:
+     - Kiểm tra phân giải DNS và chặn triệt để localhost, 127.0.0.1, IPv6 loopback, toàn bộ dải IP riêng tư RFC 1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) và IP metadata cloud (169.254.169.254).
+     - Loại bỏ thẻ script, style và bọc toàn bộ nội dung trong thẻ `<untrusted_content>` để chống prompt injection.
+  5. **4 Agent chuyên trách với ma trận đặc quyền tối thiểu (Least Privilege)**:
+     - `file_organizer_agent`: Chỉ có công cụ file/thư mục, không có quyền gọi shell hay web.
+     - `document_agent`: Chỉ có công cụ đọc/tạo tài liệu văn bản, PDF, Word, Excel.
+     - `research_agent`: Chỉ có công cụ `fetch_webpage`, đọc file và ghi chú. **Tuyệt đối CẤM `delete_path` và `run_command`** để triệt tiêu nguy cơ prompt injection từ web đánh lừa agent thực thi lệnh phá hoại.
+     - `coder_agent`: Chuyên viết script và chạy lệnh kiểm thử trong workspace (`run_command` luôn yêu cầu `CONFIRM`).
+  6. **Quy tắc điều phối**: Agent chính chỉ gọi `delegate_to_agent` khi tác vụ phức tạp nhiều bước; các yêu cầu đơn giản agent chính xử lý trực tiếp để tiết kiệm chi phí và độ trễ.
+- **Lý do**: Tối ưu hiệu năng, bảo mật tối đa trước prompt injection từ internet, và phân tách trách nhiệm rõ ràng.
+- **Thư viện mới**:
+  - `pypdf>=4.0.0`: Trích xuất nội dung văn bản PDF.
+  - `python-docx>=1.1.0`: Đọc và tạo tài liệu Word (.docx).
+  - `openpyxl>=3.1.0`: Đọc và tạo bảng tính Excel (.xlsx).
+
+
 
 
