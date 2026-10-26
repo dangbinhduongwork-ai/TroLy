@@ -39,11 +39,14 @@ class MemoryStore:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Tạo kết nối tới SQLite và bật chế độ WAL cùng Foreign Keys."""
+        """Tạo kết nối tới SQLite và bật chế độ WAL, tối ưu PRAGMA cho SSD cùng Foreign Keys."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = -32000;")
+        conn.execute("PRAGMA temp_store = MEMORY;")
         conn.execute("PRAGMA foreign_keys=ON;")
         return conn
 
@@ -114,6 +117,14 @@ class MemoryStore:
                     tokenize='unicode61'
                 );
                 """
+            )
+
+            # 6. Các chỉ mục (INDEX) tăng tốc truy vấn thường xuyên
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);"
             )
 
     # =========================================================================

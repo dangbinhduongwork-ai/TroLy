@@ -39,11 +39,14 @@ class ReminderStore:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Tạo kết nối tới SQLite và bật chế độ WAL."""
+        """Tạo kết nối tới SQLite và bật chế độ WAL cùng tối ưu PRAGMA cho SSD."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = -32000;")
+        conn.execute("PRAGMA temp_store = MEMORY;")
         return conn
 
     def _init_db(self) -> None:

@@ -83,6 +83,18 @@ def test_reminder_store_crud(tmp_path: Path) -> None:
     assert ok_cancel is True
     assert store.get_reminder(rid)["status"] == "cancelled"
 
+    # 5. Kiểm tra PRAGMA và index tối ưu SSD
+    conn = store._get_connection()
+    try:
+        assert conn.execute("PRAGMA synchronous;").fetchone()[0] == 1  # 1 = NORMAL
+        assert conn.execute("PRAGMA temp_store;").fetchone()[0] == 2   # 2 = MEMORY
+        assert conn.execute("PRAGMA cache_size;").fetchone()[0] == -32000
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='index';")
+        indices = [r[0] for r in cur.fetchall()]
+        assert "idx_reminders_status_trigger" in indices
+    finally:
+        conn.close()
+
     # 5. Xoá lời nhắc
     ok_del = store.delete_reminder(rid)
     assert ok_del is True

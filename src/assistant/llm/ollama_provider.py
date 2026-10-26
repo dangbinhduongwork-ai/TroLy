@@ -6,6 +6,7 @@ Tên model được lấy trực tiếp từ config, có hướng dẫn cụ th�
 
 from collections.abc import AsyncIterator
 import json
+import time
 from typing import Any
 import httpx
 
@@ -26,6 +27,9 @@ class OllamaProvider(LLMProvider):
         self._config = config or load_config(create_dirs=False)
         self._host = self._config.ollama_host.rstrip("/")
         self._model_name = self._config.local_model
+        self._cached_models: list[str] = []
+        self._last_models_check_time: float = 0.0
+        self._models_ttl_seconds: float = 60.0
 
     @property
     def provider_name(self) -> str:
@@ -35,11 +39,17 @@ class OllamaProvider(LLMProvider):
     def default_model(self) -> str:
         return self._model_name
 
+    def invalidate_model_cache(self) -> None:
+        """Xóa bộ đệm danh sách model để buộc truy vấn lại từ Ollama ở lần gọi kế tiếp."""
+        self._cached_models = []
+        self._last_models_check_time = 0.0
+
     def set_model(self, model_name: str) -> None:
-        """Đổi mô hình Ollama cục bộ đang hoạt động."""
+        """Đổi mô hình Ollama cục bộ đang hoạt động và làm mới cache."""
         clean_name = model_name.strip()
         if clean_name:
             self._model_name = clean_name
+            self.invalidate_model_cache()
 
     async def is_available(self) -> bool:
         """Kiểm tra máy chủ Ollama có đang hoạt động trên máy hay không."""
@@ -50,14 +60,25 @@ class OllamaProvider(LLMProvider):
         except Exception:
             return False
 
-    async def list_models(self) -> list[str]:
-        """Lấy danh sách các model đã được cài đặt tải về trong Ollama."""
+    async def list_models(self, force_refresh: bool = False) -> list[str]:
+        """Lấy danh sách các model đã được cài đặt trong Ollama (có cache TTL 60 giây)."""
+        now = time.time()
+        if (
+            not force_refresh
+            and self._cached_models
+            and (now - self._last_models_check_time) < self._models_ttl_seconds
+        ):
+            return list(self._cached_models)
+
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 res = await client.get(f"{self._host}/api/tags")
                 if res.status_code == 200:
                     data = res.json()
-                    return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+                    models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+                    self._cached_models = models
+                    self._last_models_check_time = time.time()
+                    return list(models)
                 raise ProviderError(
                     kind="server_5xx",
                     message=f"Máy chủ Ollama phản hồi mã lỗi {res.status_code}",

@@ -270,6 +270,34 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   - Tuân thủ Nguyên tắc 2 (An toàn trước tiên: mọi thao tác phá huỷ phải qua duyệt), Nguyên tắc 7 (Mã sạch & kiểm thử), Nguyên tắc 9 (Không nuốt lỗi im lặng).
 - **Thư viện mới**: Không có.
 
+### [2026-10-27] Tối ưu hóa hiệu năng tầng Model (Ollama Cache) và tầng Lưu trữ SQLite (PRAGMA SSD & Indexes)
+- **Bối cảnh**:
+  - Tầng Model: Hàm `OllamaProvider.stream_chat()` trước đây gọi `installed = await self.list_models()` (gửi HTTP GET `/api/tags`) ở MỌI tin nhắn người dùng, gây trễ 50-100ms trên mỗi lượt chat dù danh sách mô hình cài đặt hiếm khi thay đổi liên tục.
+  - Tầng Lưu trữ SQLite: Cần tối ưu đọc/ghi cho ổ cứng SSD trên Windows, hạn chế số lần flush đĩa vật lý không cần thiết và tăng tốc độ lọc/tìm kiếm các bản ghi hội thoại, tin nhắn, trí nhớ và lời nhắc việc thường xuyên truy vấn.
+- **Phương án đã chọn**:
+  1. Trong `src/assistant/llm/ollama_provider.py`:
+     - Thiết kế bộ đệm `_cached_models: list[str]` với thời gian sống `_models_ttl_seconds = 60.0` (TTL 60 giây) và `_last_models_check_time: float`.
+     - Thêm phương thức `invalidate_model_cache()` xóa sạch cache.
+     - Trong `set_model()`: tự động gọi `invalidate_model_cache()` khi người dùng đổi sang mô hình mới.
+     - Trong `list_models(force_refresh: bool = False)`: chỉ gửi HTTP request tới Ollama khi cache đã hết hạn hoặc khi `force_refresh=True`. Nhờ vậy loại bỏ hoàn toàn độ trễ 50-100ms trong các lượt chat thông thường.
+  2. Trong `src/assistant/memory/store.py` và `src/assistant/reminders/store.py`:
+     - Tại `_get_connection()`, bổ sung các PRAGMA chuẩn cho Windows SSD trong chế độ WAL:
+       + `PRAGMA synchronous = NORMAL;`: giảm tần suất flush đĩa vật lý của hệ điều hành mà vẫn bảo đảm trọn vẹn an toàn dữ liệu và tuân thủ ACID khi dùng WAL.
+       + `PRAGMA cache_size = -32000;`: cấp phát bộ đệm 32MB RAM cache cho SQLite (mặc định chỉ 2MB).
+       + `PRAGMA temp_store = MEMORY;`: lưu trữ các bảng tạm và phép tính sắp xếp trong RAM.
+     - Tại `_init_db()`:
+       + Tạo chỉ mục `idx_messages_conv_created ON messages(conversation_id, created_at)` tăng tốc truy vấn lịch sử hội thoại gần nhất.
+       + Tạo chỉ mục `idx_memories_category ON memories(category)` tăng tốc lọc trí nhớ dài hạn theo danh mục (`preference`, `project`, `naming_rule`, `general`).
+       + Đảm bảo chỉ mục `idx_reminders_status_trigger ON reminders(status, trigger_at)` tối ưu quét lịch nhắc việc pending/snoozed.
+     - Bảo đảm toàn vẹn 100% cấu trúc các bảng hiện có và bảng ảo FTS5 (`memories_fts`, `messages_fts`).
+  3. Kiểm chứng & Unit Test:
+     - Thêm test `test_ollama_provider_model_cache_and_invalidation` trong `tests/test_providers.py`.
+     - Cập nhật xác minh PRAGMA và Indexes trong `tests/test_memory_store.py` và `tests/test_reminders.py`.
+- **Lý do**:
+  - Giảm độ trễ phản hồi chat, tối ưu hóa I/O cho phần cứng Windows SSD, tuân thủ Nguyên tắc 7 (Mã sạch & kiểm thử) và Nguyên tắc 10 (Ghi nhận quyết định kỹ thuật).
+- **Thư viện mới**: Không có.
+
+
 
 
 

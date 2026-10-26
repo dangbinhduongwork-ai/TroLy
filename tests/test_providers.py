@@ -1,4 +1,5 @@
-"""Kiểm thử tự động cho việc chuyển đổi định dạng tin nhắn và phân loại lỗi của các LLM Provider."""
+from unittest.mock import MagicMock, patch
+import pytest
 
 from assistant.llm.base import (
     Message,
@@ -103,4 +104,49 @@ def test_message_name_field_and_gemini_conversion() -> None:
         if tc_item.id and tc_item.name
     }
     assert tool_call_id_to_name.get("call_abc_999") == "read_file"
+
+
+@pytest.mark.asyncio
+async def test_ollama_provider_model_cache_and_invalidation() -> None:
+    """Kiểm tra bộ đệm TTL 60s cho list_models và invalidate_model_cache."""
+    from pathlib import Path
+    from assistant.config import Config
+    from assistant.llm.ollama_provider import OllamaProvider
+
+    cfg = Config(workspace_dir=Path("."), data_dir=Path("."), local_model="qwen2.5:14b")
+    provider = OllamaProvider(cfg)
+
+    call_count = 0
+
+    async def fake_get(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"models": [{"name": "qwen2.5:14b"}, {"name": "llama3:8b"}]}
+        return mock_resp
+
+    with patch("httpx.AsyncClient.get", side_effect=fake_get):
+        # 1. Gọi lần đầu -> HTTP GET được gửi
+        models1 = await provider.list_models()
+        assert call_count == 1
+        assert "qwen2.5:14b" in models1
+
+        # 2. Gọi lần hai ngay sau đó -> trúng cache, không tăng call_count
+        models2 = await provider.list_models()
+        assert call_count == 1
+        assert models2 == models1
+
+        # 3. invalidate_model_cache -> buộc gọi lại HTTP GET
+        provider.invalidate_model_cache()
+        models3 = await provider.list_models()
+        assert call_count == 2
+        assert models3 == models1
+
+        # 4. set_model tự động invalidate cache
+        provider.set_model("llama3:8b")
+        models4 = await provider.list_models()
+        assert call_count == 3
+        assert provider.default_model == "llama3:8b"
+        assert models4 == models1
 
