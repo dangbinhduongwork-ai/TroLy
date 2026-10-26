@@ -8,8 +8,15 @@ Kiểm tra:
 """
 
 from collections.abc import AsyncIterator
+from typing import Any
+from unittest.mock import MagicMock, patch
 import pytest
-from assistant.agents.orchestrator import run_subagent
+from assistant.agents.orchestrator import (
+    delegate_to_agent,
+    get_orchestrator_approval_callback,
+    run_subagent,
+    set_orchestrator_approval_callback,
+)
 from assistant.agents.spec import (
     SPECIALIZED_AGENTS,
     coder_agent,
@@ -29,7 +36,7 @@ class MockSubagentProvider(LLMProvider):
         self.response_text = response_text
         self.tool_calls = tool_calls or []
         self.default_model = "mock-agent"
-        self.received_tools: list[dict] = []
+        self.received_tools: list[dict[str, Any]] = []
 
     @property
     def provider_name(self) -> str:
@@ -38,7 +45,7 @@ class MockSubagentProvider(LLMProvider):
     async def stream_chat(
         self,
         messages: list[Message],
-        tools: list[dict] | None = None,
+        tools: list[dict[str, Any]] | None = None,
         system: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         if tools:
@@ -135,4 +142,110 @@ def test_no_circular_import_on_tools_and_agents() -> None:
     lazy_delegate = getattr(tools_mod, "delegate_to_agent")
     assert lazy_delegate is orch_delegate
     assert callable(lazy_delegate)
+
+
+@pytest.mark.asyncio
+async def test_subagent_triggers_approval_callback() -> None:
+    """Kiểm chứng khi subagent gọi công cụ CONFIRM, approval_callback được kích hoạt thành công."""
+    tool_call = ToolCall(
+        id="call_cmd_1",
+        name="run_command",
+        arguments={"command": "dir"},
+    )
+    mock_provider = MockSubagentProvider(
+        response_text="Đã chạy lệnh thành công.",
+        tool_calls=[tool_call],
+    )
+    router = ModelRouter(gemini_provider=mock_provider, ollama_provider=mock_provider)
+
+    approval_calls: list[dict[str, Any]] = []
+
+    async def mock_approval(tool_name: str, args: dict[str, Any], reason: str) -> bool:
+        approval_calls.append({"tool_name": tool_name, "args": args, "reason": reason})
+        return True  # Chấp thuận thực thi
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="test_dir_output", stderr="")
+        res = await run_subagent(
+            agent_name="coder_agent",
+            task_description="Hãy liệt kê thư mục bằng lệnh dir",
+            router=router,
+            approval_callback=mock_approval,
+        )
+
+    assert res["ok"] is True
+    assert len(approval_calls) == 1
+    assert approval_calls[0]["tool_name"] == "run_command"
+    assert approval_calls[0]["args"]["command"] == "dir"
+
+
+@pytest.mark.asyncio
+async def test_subagent_approval_rejection_handled() -> None:
+    """Kiểm chứng khi người dùng từ chối (approval_callback trả về False), công cụ không được chạy."""
+    tool_call = ToolCall(
+        id="call_cmd_2",
+        name="run_command",
+        arguments={"command": "del important.txt"},
+    )
+    mock_provider = MockSubagentProvider(
+        response_text="Người dùng đã từ chối lệnh này.",
+        tool_calls=[tool_call],
+    )
+    router = ModelRouter(gemini_provider=mock_provider, ollama_provider=mock_provider)
+
+    approval_called = False
+
+    async def mock_reject(tool_name: str, args: dict[str, Any], reason: str) -> bool:
+        nonlocal approval_called
+        approval_called = True
+        return False  # Từ chối
+
+    res = await run_subagent(
+        agent_name="coder_agent",
+        task_description="Hãy xoá file",
+        router=router,
+        approval_callback=mock_reject,
+    )
+
+    assert res["ok"] is True
+    assert approval_called is True
+
+
+@pytest.mark.asyncio
+async def test_delegate_to_agent_inherits_orchestrator_approval() -> None:
+    """Kiểm chứng delegate_to_agent tự động kế thừa approval_callback từ orchestrator context."""
+    from assistant.agents.orchestrator import set_orchestrator_router
+
+    tool_call = ToolCall(
+        id="call_cmd_3",
+        name="run_command",
+        arguments={"command": "dir"},
+    )
+    mock_provider = MockSubagentProvider(
+        response_text="Hoàn tất.",
+        tool_calls=[tool_call],
+    )
+    router = ModelRouter(gemini_provider=mock_provider, ollama_provider=mock_provider)
+    set_orchestrator_router(router)
+
+    approved_tools: list[str] = []
+
+    async def global_approval(tool_name: str, args: dict[str, Any], reason: str) -> bool:
+        approved_tools.append(tool_name)
+        return True
+
+    set_orchestrator_approval_callback(global_approval)
+    assert get_orchestrator_approval_callback() is global_approval
+    try:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="output", stderr="")
+            res = await delegate_to_agent(
+                agent_name="coder_agent",
+                task_description="Chạy dir",
+            )
+        assert res["ok"] is True
+        assert "run_command" in approved_tools
+    finally:
+        set_orchestrator_approval_callback(None)
+        assert get_orchestrator_approval_callback() is None
 

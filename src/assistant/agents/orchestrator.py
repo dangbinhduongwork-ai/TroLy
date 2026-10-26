@@ -8,6 +8,8 @@ Nguyên tắc:
 - Kết quả được tổng hợp và trả về cho Agent chính.
 """
 
+import contextvars
+from collections.abc import Callable
 from typing import Any
 
 from assistant.agents.spec import SPECIALIZED_AGENTS
@@ -18,6 +20,10 @@ from assistant.safety.permissions import PermissionLevel
 from assistant.tools.registry import ToolRegistry, default_tool_registry, register_tool
 
 _global_router: ModelRouter | None = None
+_global_approval_callback: Callable[..., Any] | None = None
+_orchestrator_approval_cb: contextvars.ContextVar[Callable[..., Any] | None] = contextvars.ContextVar(
+    "_orchestrator_approval_cb", default=None
+)
 
 
 def set_orchestrator_router(router: ModelRouter) -> None:
@@ -34,11 +40,28 @@ def get_orchestrator_router() -> ModelRouter:
     return _global_router
 
 
+def set_orchestrator_approval_callback(cb: Callable[..., Any] | None) -> None:
+    """Thiết lập callback duyệt quyền dùng chung cho Orchestrator."""
+    global _global_approval_callback
+    _global_approval_callback = cb
+    _orchestrator_approval_cb.set(cb)
+
+
+def get_orchestrator_approval_callback() -> Callable[..., Any] | None:
+    """Lấy callback duyệt quyền từ ContextVar hiện tại hoặc fallback biến toàn cục."""
+    cb = _orchestrator_approval_cb.get()
+    if cb is not None:
+        return cb
+    return _global_approval_callback
+
+
 async def run_subagent(
     agent_name: str,
     task_description: str,
     router: ModelRouter | None = None,
     is_sensitive: bool = False,
+    approval_callback: Callable[..., Any] | None = None,
+    on_event: Callable[[str, dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     """Thực thi một Agent chuyên trách với registry công cụ bị thu hẹp theo đặc quyền tối thiểu."""
     spec = SPECIALIZED_AGENTS.get(agent_name)
@@ -52,6 +75,7 @@ async def run_subagent(
         }
 
     active_router = router or get_orchestrator_router()
+    active_approval = approval_callback or get_orchestrator_approval_callback()
 
     # 1. Tạo ToolRegistry bị thu hẹp (Sandboxed Registry) CHỈ chứa allowed_tools
     sandboxed_registry = ToolRegistry()
@@ -69,15 +93,15 @@ async def run_subagent(
         custom_instructions=f"{spec.system_prompt}\nNhiệm vụ cụ thể: {task_description}"
     )
 
-    # 4. Khởi tạo vòng lặp agent con với registry giới hạn
+    # 4. Khởi tạo vòng lặp agent con với registry giới hạn và approval_callback
     from assistant.core.agent_loop import AgentLoop
 
     child_agent_loop = AgentLoop(
         router=active_router,
         registry=sandboxed_registry,
+        approval_callback=active_approval,
         max_steps=spec.max_steps,
     )
-
 
     accumulated_chunks: list[str] = []
     try:
@@ -85,6 +109,7 @@ async def run_subagent(
             context=child_context,
             system_prompt=child_system_prompt,
             is_sensitive=is_sensitive,
+            on_event=on_event,
         ):
             if event.type == "text_delta" and isinstance(event.content, str):
                 accumulated_chunks.append(event.content)
@@ -124,18 +149,17 @@ async def run_subagent(
     ),
     permission_level=PermissionLevel.READ,
 )
-def delegate_to_agent(agent_name: str, task_description: str) -> dict[str, Any]:
-    """Công cụ cho Agent chính gọi Agent chuyên trách (chạy đồng bộ / event loop)."""
-    import asyncio
-
-    try:
-        loop = asyncio.get_running_loop()
-        # Nếu đang trong event loop asyncio
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, run_subagent(agent_name, task_description))
-            return future.result()
-    except RuntimeError:
-        # Nếu không có loop đang chạy
-        return asyncio.run(run_subagent(agent_name, task_description))
+async def delegate_to_agent(
+    agent_name: str,
+    task_description: str,
+    approval_callback: Callable[..., Any] | None = None,
+    on_event: Callable[[str, dict[str, Any]], Any] | None = None,
+) -> dict[str, Any]:
+    """Công cụ cho Agent chính gọi Agent chuyên trách (hỗ trợ bất đồng bộ trong AgentLoop)."""
+    active_approval = approval_callback or get_orchestrator_approval_callback()
+    return await run_subagent(
+        agent_name=agent_name,
+        task_description=task_description,
+        approval_callback=active_approval,
+        on_event=on_event,
+    )

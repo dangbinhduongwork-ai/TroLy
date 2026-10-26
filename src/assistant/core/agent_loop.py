@@ -17,6 +17,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 import inspect
 import json
+import sys
 from typing import Any
 
 from assistant.core.context import ConversationContext
@@ -35,6 +36,9 @@ from assistant.tools.registry import ToolRegistry, default_tool_registry
 
 def ask_terminal_approval(tool_name: str, args: dict[str, Any], reason: str) -> bool:
     """Hỏi phê duyệt từ người dùng trực tiếp trên giao diện dòng lệnh (terminal)."""
+    if sys.stdin is None:
+        return False
+
     print("\n" + "=" * 65)
     print(f"⚠️  [YÊU CẦU PHÊ DUYỆT TÁC VỤ: {tool_name}]")
     print(f"Lý do cần duyệt : {reason}")
@@ -44,7 +48,7 @@ def ask_terminal_approval(tool_name: str, args: dict[str, Any], reason: str) -> 
     try:
         choice = input("Bạn có đồng ý cho Trợ lý thực hiện tác vụ này không? (y/N): ").strip().lower()
         return choice in ("y", "yes", "co", "dong y", "ok")
-    except (KeyboardInterrupt, EOFError):
+    except (KeyboardInterrupt, EOFError, OSError):
         print("\n[Đã từ chối theo yêu cầu]")
         return False
 
@@ -227,7 +231,30 @@ class AgentLoop:
                 # e) Thực thi công cụ
                 await _emit("tool_start", {"tool_name": tc.name, "arguments": tc.arguments})
                 yield StreamEvent(type="text_delta", content=f"\n[Đang chạy: {tc.name}...] ")
-                execution_res = tool_def.execute(**tc.arguments)
+
+                kwargs_to_pass = dict(tc.arguments)
+                try:
+                    func_params = inspect.signature(tool_def.func).parameters
+                    if "approval_callback" in func_params and "approval_callback" not in kwargs_to_pass:
+                        kwargs_to_pass["approval_callback"] = self.approval_callback
+                    if "on_event" in func_params and "on_event" not in kwargs_to_pass:
+                        kwargs_to_pass["on_event"] = on_event
+                except Exception:
+                    pass
+
+                if inspect.iscoroutinefunction(tool_def.func):
+                    try:
+                        raw_res = await tool_def.func(**kwargs_to_pass)
+                        if isinstance(raw_res, dict) and "ok" in raw_res:
+                            execution_res = raw_res
+                        else:
+                            execution_res = {"ok": True, "data": raw_res, "error": None, "truncated": False}
+                    except Exception as err:
+                        execution_res = {"ok": False, "data": None, "error": str(err), "truncated": False}
+                else:
+                    execution_res = tool_def.execute(**kwargs_to_pass)
+                    if inspect.isawaitable(execution_res):
+                        execution_res = await execution_res
 
                 is_ok = execution_res.get("ok", False)
                 raw_data = execution_res.get("data") if is_ok else execution_res.get("error")

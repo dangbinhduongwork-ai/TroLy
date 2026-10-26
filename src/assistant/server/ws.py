@@ -18,6 +18,7 @@ import uuid
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from assistant.agents.orchestrator import set_orchestrator_approval_callback
 from assistant.config import Config, load_config
 from assistant.core.agent_loop import AgentLoop
 from assistant.core.context import ConversationContext
@@ -239,6 +240,9 @@ class ChatWebSocketManager:
             finally:
                 self.pending_approvals.pop(req_id, None)
 
+        # Đăng ký callback duyệt quyền cho Orchestrator subagents trong lượt này
+        set_orchestrator_approval_callback(_websocket_approval)
+
         # 6. Định nghĩa bộ lắng nghe sự kiện để truyền xuống WebSocket
         tools_called_in_turn: list[str] = []
 
@@ -324,5 +328,6 @@ class ChatWebSocketManager:
             await self._send_event(websocket, "error", {"error": f"Lỗi xử lý: {err}"})
             await self._send_event(websocket, "turn_done", {"conversation_id": conv_id or ""})
         finally:
+            set_orchestrator_approval_callback(None)
             # Khôi phục lại chế độ router ban đầu
             self.router.set_mode(orig_mode)

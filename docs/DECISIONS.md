@@ -245,6 +245,31 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
   - Tuân thủ triệt để 12 Nguyên tắc bất biến (Nguyên tắc 1: Đúng phạm vi, Nguyên tắc 2: An toàn bảo mật, Nguyên tắc 6: Thư viện chuẩn xác, Nguyên tắc 7: Mã sạch & kiểm thử).
 - **Thư viện mới**: Không có.
 
+### [2026-10-27] Nâng cấp cơ chế ủy quyền đa Agent và luồng duyệt quyền bất đồng bộ (Multi-Agent Approval)
+- **Bối cảnh**:
+  - Khi `run_subagent()` trong `src/assistant/agents/orchestrator.py` khởi tạo `child_agent_loop = AgentLoop(...)`, nó không nhận `approval_callback` nên nhận mặc định là `ask_terminal_approval` (dùng `input()` từ console).
+  - Khi chạy trên Web UI / Desktop EXE (`--noconsole`), nếu một agent con (như `coder_agent` hoặc `file_organizer_agent`) gọi công cụ cấp `CONFIRM` (ví dụ `run_command`, `delete_path`), ứng dụng bị treo vĩnh viễn (freeze) vì không có console stdin để người dùng nhập liệu, đồng thời modal xác nhận trên web không được kích hoạt.
+- **Phương án đã chọn**:
+  1. Trong `src/assistant/agents/orchestrator.py`:
+     - Thiết lập biến `_orchestrator_approval_cb` thông qua `contextvars.ContextVar` và biến dự phòng toàn cục `_global_approval_callback`.
+     - Cung cấp 2 hàm quản lý `set_orchestrator_approval_callback(cb)` và `get_orchestrator_approval_callback()`.
+     - Nâng cấp hàm `run_subagent(..., approval_callback=None, on_event=None)`: nhận tham số `approval_callback` và fallback về `get_orchestrator_approval_callback()`. Truyền callback này vào `AgentLoop(..., approval_callback=active_approval)` của agent con.
+     - Chuyển `delegate_to_agent` thành hàm bất đồng bộ (`async def`), nhận `approval_callback` và `on_event` để chạy trực tiếp trên asyncio event loop hiện hành, loại bỏ `ThreadPoolExecutor` không cần thiết.
+  2. Trong `src/assistant/core/agent_loop.py`:
+     - Hỗ trợ công cụ bất đồng bộ (`async def`): khi `inspect.iscoroutinefunction(tool_def.func)` là True, gọi `await tool_def.func(...)` trực tiếp trên cùng event loop.
+     - Tự động truyền `approval_callback=self.approval_callback` và `on_event=on_event` cho các công cụ có khai báo nhận 2 tham số này.
+     - Bổ sung phòng thủ trong `ask_terminal_approval`: kiểm tra `sys.stdin is None` và bắt `OSError` để tránh treo khi chạy trong môi trường không có bàn phím terminal.
+  3. Trong `src/assistant/tools/registry.py`:
+     - Ẩn các tham số nội bộ (`approval_callback`, `on_event`) khỏi JSON Schema sinh tự động để không làm rối model LLM.
+     - Trong `ToolDefinition.execute`: hỗ trợ tự động giải phóng coroutine nếu bị gọi từ ngữ cảnh đồng bộ.
+  4. Trong `src/assistant/server/ws.py`:
+     - Khi phiên chat bắt đầu, gọi `set_orchestrator_approval_callback(_websocket_approval)` để gắn luồng duyệt quyền qua WebSocket cho mọi agent con được uỷ quyền. Dọn dẹp trong khối `finally`.
+  5. Trong `tests/test_agents.py`:
+     - Bổ sung 3 unit test: `test_subagent_triggers_approval_callback`, `test_subagent_approval_rejection_handled`, và `test_delegate_to_agent_inherits_orchestrator_approval`.
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 2 (An toàn trước tiên: mọi thao tác phá huỷ phải qua duyệt), Nguyên tắc 7 (Mã sạch & kiểm thử), Nguyên tắc 9 (Không nuốt lỗi im lặng).
+- **Thư viện mới**: Không có.
+
 
 
 

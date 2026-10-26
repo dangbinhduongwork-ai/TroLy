@@ -58,7 +58,7 @@ def generate_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
 
     for param_name, param in sig.parameters.items():
         # Bỏ qua tham số ngữ cảnh nội bộ nếu có
-        if param_name in ("self", "context"):
+        if param_name in ("self", "context", "approval_callback", "on_event"):
             continue
 
         param_type = type_hints.get(param_name, str)
@@ -97,6 +97,20 @@ class ToolDefinition:
         """Thực thi công cụ và trả về kết quả chuẩn {ok, data, error, truncated}."""
         try:
             res = self.func(**kwargs)
+            if inspect.isawaitable(res):
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                if loop is not None and loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        res = pool.submit(asyncio.run, res).result()
+                else:
+                    res = asyncio.run(res)
+
             if isinstance(res, dict) and "ok" in res:
                 return res
             return {"ok": True, "data": res, "error": None, "truncated": False}
