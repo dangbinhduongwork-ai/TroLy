@@ -389,3 +389,49 @@ def test_desktop_window_utilities() -> None:
         args = mock_popen.call_args[0][0]
         assert isinstance(args, list)
         assert "--app=http://127.0.0.1:8000/?token=token123" in args
+
+
+def test_settings_api_endpoints(test_app_client: tuple[TestClient, str]) -> None:
+    """Kiểm tra các endpoint thiết lập và chẩn đoán bảo mật /api/settings/*."""
+    client, token = test_app_client
+    headers = {"X-Session-Token": token}
+
+    # 1. GET /api/settings/diagnostics
+    with patch("assistant.server.app.check_gemini_key", return_value=(True, "Key hợp lệ", "gemini-2.5-flash")):
+        res = client.get("/api/settings/diagnostics", headers=headers)
+        assert res.status_code == 200
+        diag = res.json()
+        assert "gemini_status" in diag
+        assert "ollama_status" in diag
+        assert "mode" in diag
+        assert "is_autostart_enabled" in diag
+
+    # 2. POST /api/settings/gemini-key
+    with patch("assistant.main.store_gemini_key", return_value=True):
+        res = client.post(
+            "/api/settings/gemini-key",
+            headers=headers,
+            json={"api_key": "AIzaSyTestKeyValid1234567890"},
+        )
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+
+    # 3. POST /api/settings/model
+    res = client.post(
+        "/api/settings/model",
+        headers=headers,
+        json={"mode": "only_local"},
+    )
+    assert res.status_code == 200
+    assert res.json()["mode"] == "only_local"
+
+    # 4. POST /api/settings/autostart
+    with patch("assistant.server.app.enable_autostart", return_value=True), patch("assistant.server.app.is_autostart_enabled", return_value=True):
+        res = client.post(
+            "/api/settings/autostart",
+            headers=headers,
+            json={"enabled": True},
+        )
+        assert res.status_code == 200
+        assert res.json()["enabled"] is True
+

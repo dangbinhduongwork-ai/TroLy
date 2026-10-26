@@ -639,11 +639,23 @@ def run_ui(
     """Khởi động Uvicorn server, APScheduler, Khay hệ thống và mở giao diện ứng dụng Desktop."""
     import threading
     import time
-    import uvicorn
-    from assistant.desktop.single_instance import check_or_acquire_instance, release_instance
-    from assistant.desktop.tray import SystemTrayManager
-    from assistant.desktop.window import launch_desktop_window
-    from assistant.server.app import create_app, get_current_session_token
+
+    try:
+        import uvicorn
+        from assistant.desktop.single_instance import check_or_acquire_instance, release_instance
+        from assistant.desktop.tray import SystemTrayManager
+        from assistant.desktop.window import launch_desktop_window
+        from assistant.server.app import create_app, get_current_session_token
+    except ImportError as err:
+        print("=" * 65)
+        print("❌ [LỖI THIẾU THƯ VIỆN GIAO DIỆN]")
+        print(f"   Chi tiết: {err}")
+        print("=" * 65)
+        print("👉 Vui lòng chạy lệnh sau trên terminal để cài đặt tự động đầy đủ thư viện:")
+        print("   pip install -e \".[dev]\"")
+        print("=" * 65)
+        return 1
+
 
     config = load_config(create_dirs=True)
     setup_logging(data_dir=config.data_dir, log_level=config.log_level)

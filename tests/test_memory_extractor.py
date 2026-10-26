@@ -168,3 +168,30 @@ async def test_extract_and_store_deduplication(tmp_path: Path) -> None:
     all_mems = store.list_memories()
     assert len(all_mems) == 1
     assert "YYYYMMDD_v2" in all_mems[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_extract_and_save_compatibility(tmp_path: Path) -> None:
+    """Kiểm tra hàm tương thích extract_and_save_memories hoạt động với các tham số từ ws.py."""
+    from assistant.memory.extractor import extract_and_save_memories
+
+    store = MemoryStore(db_path=tmp_path / "test_compat.db")
+    mock_ollama = MockProvider(
+        name="ollama",
+        mock_output='[{"category": "preference", "content": "Thích dùng dark mode"}]',
+    )
+    router = ModelRouter(gemini_provider=mock_ollama, ollama_provider=mock_ollama)
+
+    results = await extract_and_save_memories(
+        user_message="Hãy nhớ rằng tôi thích dùng dark mode",
+        assistant_message="Đã ghi nhớ sở thích của bạn.",
+        conv_id="conv-123",
+        router=router,
+        memory_store=store,
+        is_sensitive=False,
+    )
+
+    assert len(results) == 1
+    assert results[0]["category"] == "preference"
+    assert results[0]["action"] == "created"
+

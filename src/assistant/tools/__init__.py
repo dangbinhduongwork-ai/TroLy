@@ -34,10 +34,18 @@ from assistant.tools.reminder_tools import (
 from assistant.tools.shell import run_command
 from assistant.tools.system import get_system_info
 from assistant.tools.web import fetch_webpage
-from assistant.agents.orchestrator import delegate_to_agent
+
+
+def __getattr__(name: str):
+    """Nạp trễ delegate_to_agent khi được truy cập để ngăn chặn triệt để circular import."""
+    if name == "delegate_to_agent":
+        from assistant.agents.orchestrator import delegate_to_agent
+        return delegate_to_agent
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 __all__ = [
+
     "default_tool_registry",
     "register_tool",
     "list_dir",

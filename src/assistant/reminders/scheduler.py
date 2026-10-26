@@ -63,10 +63,12 @@ class ReminderScheduler:
         self,
         config: Config | None = None,
         store: ReminderStore | None = None,
+        reminder_store: ReminderStore | None = None,
     ) -> None:
         self.config = config or load_config(create_dirs=True)
-        self.store = store or ReminderStore(self.config.data_dir / "assistant.db")
+        self.store = store or reminder_store or ReminderStore(self.config.data_dir / "assistant.db")
         self.timezone_str = self.config.timezone
+
         self.scheduler: Any = None
         self._is_running = False
 

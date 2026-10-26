@@ -124,3 +124,15 @@ async def test_subagent_blocks_forbidden_tool_call() -> None:
 
     assert res["ok"] is True
     # Vì delete_path không nằm trong registry của research_agent, agent loop con từ chối thực thi
+
+
+def test_no_circular_import_on_tools_and_agents() -> None:
+    """Xác minh không có lỗi circular import khi nạp assistant.tools và assistant.agents."""
+    import assistant.tools as tools_mod
+    from assistant.agents.orchestrator import delegate_to_agent as orch_delegate
+
+    # Lấy thông qua PEP 562 lazy __getattr__
+    lazy_delegate = getattr(tools_mod, "delegate_to_agent")
+    assert lazy_delegate is orch_delegate
+    assert callable(lazy_delegate)
+

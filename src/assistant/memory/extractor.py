@@ -162,3 +162,33 @@ async def extract_and_store_memories(
             results.append({"id": new_id, "action": "created", "category": cat, "content": content})
 
     return results
+
+
+async def extract_and_save_memories(
+    user_message: str,
+    assistant_message: str = "",
+    assistant_response: str = "",
+    store: MemoryStore | None = None,
+    memory_store: MemoryStore | None = None,
+    router: ModelRouter | None = None,
+    is_sensitive: bool = False,
+    conv_id: str | None = None,
+    source_conv_id: str | None = None,
+    force_extract: bool = False,
+) -> list[dict[str, Any]]:
+    """Hàm tương thích cho việc trích xuất và lưu trữ trí nhớ từ server/ws."""
+    final_assistant = assistant_response or assistant_message
+    final_store = store or memory_store
+    final_conv_id = source_conv_id or conv_id
+    if not final_store or not router:
+        return []
+    return await extract_and_store_memories(
+        user_message=user_message,
+        assistant_response=final_assistant,
+        store=final_store,
+        router=router,
+        is_sensitive=is_sensitive,
+        source_conv_id=final_conv_id,
+        force_extract=force_extract,
+    )
+

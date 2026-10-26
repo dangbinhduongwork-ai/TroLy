@@ -24,7 +24,11 @@ echo [3/5] Thêm file vào staging...
 git add .
 
 :: 4. Commit mã nguồn
-git commit -m "feat(security): complete phase 8 with security e2e tests, settings diagnostics UI, and pyinstaller packaging" || git commit -m "feat: phase 8 security and pyinstaller packaging"
+git commit -m "fix(reminders): support reminder_store parameter in ReminderScheduler" || git commit -m "fix(memory): add extract_and_save_memories alias in extractor.py for server ws compatibility" || git commit -m "feat(phase8): complete packaging and tests"
+
+
+
+
 
 
 

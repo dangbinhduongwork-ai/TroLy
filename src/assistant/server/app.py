@@ -110,7 +110,8 @@ def create_app(
     app_router = router or ModelRouter()
     app_mem_store = memory_store or MemoryStore()
     app_rem_store = reminder_store or ReminderStore()
-    app_scheduler = scheduler or ReminderScheduler(reminder_store=app_rem_store)
+    app_scheduler = scheduler or ReminderScheduler(config=app_config, store=app_rem_store)
+
 
     ws_manager = ChatWebSocketManager(
         router=app_router,
