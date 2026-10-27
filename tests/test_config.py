@@ -36,7 +36,7 @@ ui_port = 8888
     assert config.local_model == "qwen2.5:7b"
     assert config.ollama_host == "http://127.0.0.1:11434"
     assert config.daily_soft_limit == 1000
-    assert config.max_context_tokens == 4000
+    assert config.max_context_tokens == 8192
     assert config.network_cache_seconds == 10
     assert config.ui_port == 8888
     assert config.log_level == "DEBUG"

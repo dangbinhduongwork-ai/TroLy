@@ -11,6 +11,7 @@ Bật chế độ WAL (Write-Ahead Logging) để tối ưu hiệu năng đọc/
 from datetime import datetime
 import logging
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 import uuid
@@ -63,7 +64,7 @@ class MemoryStore:
     def _get_connection(self) -> sqlite3.Connection:
         """Tạo kết nối tới SQLite và bật chế độ WAL, tối ưu PRAGMA cho SSD cùng Foreign Keys."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=15.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
@@ -153,7 +154,21 @@ class MemoryStore:
                 """
             )
 
-            # 7. Các chỉ mục (INDEX) tăng tốc truy vấn thường xuyên
+            # 7. Bảng memory_categories (Danh mục trí nhớ dài hạn động)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_categories (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    label TEXT NOT NULL,
+                    icon TEXT DEFAULT 'tag',
+                    color TEXT DEFAULT '#3b82f6',
+                    created_at TEXT NOT NULL
+                );
+                """
+            )
+
+            # 8. Các chỉ mục (INDEX) tăng tốc truy vấn thường xuyên
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at);"
             )
@@ -163,6 +178,27 @@ class MemoryStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created ON memory_embeddings(created_at);"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_categories_name ON memory_categories(name);"
+            )
+
+            # Nạp 4 danh mục mặc định nếu bảng trống
+            cur = conn.execute("SELECT COUNT(*) FROM memory_categories;")
+            if cur.fetchone()[0] == 0:
+                now_seed = get_current_iso_time()
+                default_cats = [
+                    (str(uuid.uuid4()), "preference", "Sở thích", "heart", "#ec4899", now_seed),
+                    (str(uuid.uuid4()), "project", "Dự án", "briefcase", "#3b82f6", now_seed),
+                    (str(uuid.uuid4()), "naming_rule", "Quy tắc đặt tên", "code", "#8b5cf6", now_seed),
+                    (str(uuid.uuid4()), "general", "Chung", "info", "#10b981", now_seed),
+                ]
+                conn.executemany(
+                    """
+                    INSERT INTO memory_categories (id, name, label, icon, color, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    default_cats,
+                )
 
     # =========================================================================
     # QUẢN LÝ HỘI THOẠI (CONVERSATIONS)
@@ -564,18 +600,42 @@ class MemoryStore:
         fts_results = self.search_memories(q_clean, limit=top_k * 2)
         fts_ids = [r["id"] for r in fts_results]
 
+        # Kiểm tra nhanh: Nếu bảng memory_embeddings chưa có bất kỳ bản ghi nào,
+        # lập tức trả về fts_results[:top_k] mà không tốn chi phí gọi Ollama sinh vector.
+        try:
+            with self._get_connection() as conn:
+                has_vector = conn.execute("SELECT 1 FROM memory_embeddings LIMIT 1").fetchone()
+            if not has_vector:
+                return fts_results[:top_k]
+        except Exception:
+            return fts_results[:top_k]
+
         # 2. Sinh vector embedding cho truy vấn
         target_host = host or self.ollama_host
         target_model = embedding_model or self.embedding_model
 
         query_vec: list[float] | None = None
         try:
-            query_vec = get_embedding_sync(q_clean, host=target_host, model=target_model)
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    get_embedding_sync,
+                    q_clean,
+                    host=target_host,
+                    model=target_model,
+                    timeout=1.5,
+                )
+                query_vec = future.result(timeout=1.6)
         except Exception as exc:
-            logger.debug("Không thể lấy embedding cho truy vấn '%s': %s", q_clean, exc)
+            logger.debug(
+                "Bỏ qua vector embedding cho truy vấn '%s' (quá 1.5s hoặc lỗi): %s",
+                q_clean,
+                exc,
+            )
             query_vec = None
 
-        # Nếu không lấy được vector embedding (Ollama chưa bật hoặc lỗi model), fallback mượt mà
+        # Nếu không lấy được vector embedding (Ollama chưa bật hoặc lỗi model hoặc quá 1.5s), fallback mượt mà
         if query_vec is None:
             return fts_results[:top_k]
 
@@ -632,3 +692,103 @@ class MemoryStore:
                 ordered_results.append(mem_dict[mem_id])
 
         return ordered_results
+
+    # =========================================================================
+    # QUẢN LÝ DANH MỤC TRÍ NHỚ (MEMORY CATEGORIES)
+    # =========================================================================
+
+    def list_categories(self) -> list[dict[str, Any]]:
+        """Trả về toàn bộ danh mục trí nhớ sắp xếp theo ngày tạo."""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM memory_categories ORDER BY created_at ASC;")
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_category_by_id(self, cat_id: str) -> dict[str, Any] | None:
+        """Lấy thông tin danh mục theo ID."""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM memory_categories WHERE id = ?;", (cat_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_category_by_name(self, name: str) -> dict[str, Any] | None:
+        """Lấy thông tin danh mục theo mã name (slug)."""
+        clean_name = re.sub(r"[^a-z0-9_-]", "", name.strip().lower())
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM memory_categories WHERE name = ?;", (clean_name,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def add_category(
+        self,
+        name: str,
+        label: str,
+        icon: str = "tag",
+        color: str = "#3b82f6",
+    ) -> str:
+        """Thêm danh mục trí nhớ mới."""
+        clean_name = re.sub(r"[^a-z0-9_-]", "", name.strip().lower())
+        if not clean_name:
+            raise ValueError("Mã định danh danh mục (name) không hợp lệ.")
+        clean_label = label.strip()
+        if not clean_label:
+            raise ValueError("Tên nhãn danh mục không được để trống.")
+
+        cat_id = str(uuid.uuid4())
+        now = get_current_iso_time()
+        clean_icon = (icon or "tag").strip()
+        clean_color = (color or "#3b82f6").strip()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_categories (id, name, label, icon, color, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (cat_id, clean_name, clean_label, clean_icon, clean_color, now),
+            )
+        return cat_id
+
+    def update_category(
+        self,
+        cat_id: str,
+        label: str | None = None,
+        icon: str | None = None,
+        color: str | None = None,
+    ) -> bool:
+        """Cập nhật nhãn, biểu tượng hoặc màu của danh mục."""
+        fields: list[str] = []
+        params: list[Any] = []
+
+        if label is not None:
+            fields.append("label = ?")
+            params.append(label.strip())
+        if icon is not None:
+            fields.append("icon = ?")
+            params.append(icon.strip())
+        if color is not None:
+            fields.append("color = ?")
+            params.append(color.strip())
+
+        if not fields:
+            return False
+
+        params.append(cat_id)
+        query = f"UPDATE memory_categories SET {', '.join(fields)} WHERE id = ?"
+        with self._get_connection() as conn:
+            cur = conn.execute(query, tuple(params))
+            return cur.rowcount > 0
+
+    def delete_category(self, cat_name: str) -> bool:
+        """Xoá danh mục. Chuyển toàn bộ dữ kiện sang 'general' trước khi xoá."""
+        clean_name = cat_name.strip().lower()
+        if clean_name == "general":
+            # Không cho phép xoá danh mục mặc định
+            return False
+
+        with self._get_connection() as conn:
+            # 1. Chuyển toàn bộ dữ kiện trí nhớ thuộc danh mục bị xoá về 'general'
+            conn.execute("UPDATE memories SET category = 'general' WHERE category = ?;", (clean_name,))
+            conn.execute("UPDATE memories_fts SET category = 'general' WHERE category = ?;", (clean_name,))
+            # 2. Xoá danh mục khỏi bảng memory_categories
+            cur = conn.execute("DELETE FROM memory_categories WHERE name = ?;", (clean_name,))
+            return cur.rowcount > 0

@@ -59,6 +59,14 @@ def test_file_tools_lifecycle(tmp_path: Path, monkeypatch) -> None:
     assert res_search_content["ok"] is True
     assert len(res_search_content["data"]) >= 1
 
+    # 6b. Kiểm tra bỏ qua thư mục nặng (.git, node_modules, .venv)
+    git_dir = ws / ".git"
+    git_dir.mkdir(parents=True, exist_ok=True)
+    (git_dir / "notes_git.txt").write_text("Không được tìm thấy", encoding="utf-8")
+    res_search_ignore = search_files(query="notes_git")
+    assert res_search_ignore["ok"] is True
+    assert len(res_search_ignore["data"]) == 0
+
     # 7. Đổi tên file
     res_rename = rename_path("docs/notes.txt", "notes_renamed.txt")
     assert res_rename["ok"] is True

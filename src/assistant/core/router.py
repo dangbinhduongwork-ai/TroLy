@@ -46,21 +46,21 @@ class NetworkChecker:
         if (now - self._last_check_time) < self.cache_duration_sec:
             return self._cached_is_online
 
-        # Kiểm tra nhanh kết nối socket TCP tới DNS 1.1.1.1 cổng 53 (thời gian phản hồi thường < 50ms)
+        # Kiểm tra kết nối socket TCP tới cổng 443 (HTTPS) với địa chỉ 1.1.1.1 hoặc 8.8.8.8 với timeout 2.0s
         try:
             _, writer = await asyncio.wait_for(
-                asyncio.open_connection("1.1.1.1", 53),
-                timeout=1.5,
+                asyncio.open_connection("1.1.1.1", 443),
+                timeout=2.0,
             )
             writer.close()
             await writer.wait_closed()
             self._cached_is_online = True
         except Exception:
-            # Dự phòng kiểm tra bằng DNS dự phòng 8.8.8.8
+            # Dự phòng kiểm tra bằng 8.8.8.8 cổng 443
             try:
                 _, writer = await asyncio.wait_for(
-                    asyncio.open_connection("8.8.8.8", 53),
-                    timeout=1.5,
+                    asyncio.open_connection("8.8.8.8", 443),
+                    timeout=2.0,
                 )
                 writer.close()
                 await writer.wait_closed()
@@ -156,7 +156,7 @@ class ModelRouter:
         self.mode = mode
 
     def is_network_available(self) -> bool:
-        """Kiểm tra nhanh kết nối Internet (dùng cache hoặc socket đồng bộ với timeout ngắn)."""
+        """Kiểm tra nhanh kết nối Internet (dùng cache hoặc socket đồng bộ với timeout 1.5s trên cổng 443)."""
         checker = self.network_checker
         if hasattr(checker, "is_online_val"):
             return bool(getattr(checker, "is_online_val"))
@@ -166,14 +166,25 @@ class ModelRouter:
             return checker._cached_is_online
 
         import socket
+        is_on = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.4)
-            res = sock.connect_ex(("1.1.1.1", 53))
+            sock.settimeout(1.5)
+            res = sock.connect_ex(("1.1.1.1", 443))
             sock.close()
             is_on = (res == 0)
         except Exception:
             is_on = False
+
+        if not is_on:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1.5)
+                res = sock.connect_ex(("8.8.8.8", 443))
+                sock.close()
+                is_on = (res == 0)
+            except Exception:
+                is_on = False
 
         checker._cached_is_online = is_on
         checker._last_check_time = now
@@ -238,7 +249,7 @@ class ModelRouter:
         if warning_msg:
             yield StreamEvent(type="text_delta", content=f"{warning_msg}\n\n")
 
-        max_retries = 2
+        max_retries = 1
         for attempt in range(max_retries + 1):
             try:
                 # Đếm số sự kiện text đã phát ra
@@ -260,11 +271,10 @@ class ModelRouter:
                 if err.kind in ("auth", "content_blocked"):
                     raise err
 
-                # Lỗi mạng, 429 hoặc lỗi 5xx từ máy chủ: Thử lại với exponential backoff
+                # Lỗi mạng, 429 hoặc lỗi 5xx từ máy chủ: Thử lại tối đa 1 lần với backoff ngắn
                 if err.kind in ("network", "quota_429", "server_5xx"):
                     if attempt < max_retries:
-                        backoff_time = (attempt + 1) * 1.0  # 1.0s, 2.0s
-                        await asyncio.sleep(backoff_time)
+                        await asyncio.sleep(0.5)
                         continue
 
                 # Mọi lỗi khác (bao gồm 404/model ngừng hỗ trợ hoặc khi đã thử hết số lần cho phép):
@@ -275,9 +285,7 @@ class ModelRouter:
 
                 yield StreamEvent(
                     type="text_delta",
-                    content=(
-                        f"[Hệ thống: Đã chuyển sang model cục bộ vì {fallback_reason}]\n\n"
-                    ),
+                    content="[Đang chuyển sang mô hình cục bộ Ollama...]\n\n",
                 )
                 try:
                     async for event in self.ollama_provider.stream_chat(messages, tools, system):

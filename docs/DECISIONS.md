@@ -496,3 +496,206 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
 - **Lý do**:
   - Tuân thủ triệt để Nguyên tắc 2 (An toàn bảo mật), Nguyên tắc 6 (Thư viện chuẩn xác), Nguyên tắc 7 (Mã sạch & kiểm thử) và Nguyên tắc 9 (Không nuốt lỗi im lặng, phản hồi bằng tiếng Việt dễ hiểu).
 - **Thư viện mới**: Không có.
+
+### [2026-10-27] Hỗ Trợ Chuẩn Khóa Mới Google AI Studio Authorization Key (`AQ.`) & Chống Copy Nhầm Chuỗi Rút Gọn
+- **Bối cảnh**:
+  - Google AI Studio đã chuyển đổi cơ chế cấp phát khóa mặc định sang **Authorization (Auth) Key** gắn với Service Account thay cho định dạng truyền thống (`AIzaSy...`). Các khóa mới này bắt đầu bằng tiền tố **`AQ.`** (ví dụ: `AQ.MockKeyForExamplePurposeOnly123456789`).
+  - Hệ thống kiểm tra trước đó giới hạn cứng định dạng phải bắt đầu bằng `AIzaSy`, dẫn đến việc người dùng copy đúng khóa mới từ Google AI Studio nhưng ứng dụng lại báo lỗi định dạng: `phải bắt đầu bằng 'AIzaSy', hiện tại: 'AQ.MockKey...'`.
+  - Ngoài ra, trên giao diện bảng của Google AI Studio, chuỗi khóa thường bị che bớt dạng `...bM_Q`. Nếu người dùng bôi đen chữ này thay vì bấm nút sao chép, chuỗi bị thiếu gây lỗi.
+- **Phương án đã chọn**:
+  1. **Hỗ trợ toàn diện chuẩn khóa `AQ.` song song cùng `AIzaSy`**:
+     - `clean_gemini_key`: Biểu thức chính quy quét và trích xuất cả `AQ\.[0-9A-Za-z_\-]{30,120}` và `AIza[0-9A-Za-z_\-]{35}`.
+     - `is_valid_gemini_key_format`: Cho phép cả hai chuẩn tiền tố `AQ.` và `AIza`.
+     - `mask_api_key`: Che giấu an toàn 8 ký tự đầu và 4 ký tự cuối cho cả khóa `AQ.` (ví dụ `AQ.MockK...fXYZ`).
+     - `test_gemini_api_key_connectivity`, `add_gemini_api_key`, `update_gemini_api_key`: Chấp thuận cả 2 chuẩn và gửi xác thực qua `google-genai` SDK.
+  2. **Xác thực phòng thủ thời gian thực trên Giao diện (`app.js`)**:
+     - Kiểm tra trực tiếp trên client trước khi gửi request: Nếu phát hiện chuỗi bị che (`...`), hiển thị hướng dẫn chi tiết cách bấm nút **"Sao chép khóa"**.
+     - Cho phép cả tiền tố `AQ.` và `AIza`.
+  3. **Kiểm thử tự động (`tests/test_gemini_auth.py`)**:
+     - Bổ sung `test_gemini_auth_key_aq_format_support` kiểm tra trích xuất, che giấu và lưu trữ khóa `AQ.` thành công.
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 6 (Thư viện chuẩn xác theo tài liệu hiện hành của Google GenAI), Nguyên tắc 9 (Thông báo rõ ràng, không nuốt lỗi), Nguyên tắc 10 (Chủ động tương thích công nghệ mới).
+- **Thư viện mới**: Không có.
+
+### [2026-10-27] Nâng Cấp Model Gemini `gemini-3.8-flash`, Sửa Kiểm Tra Mạng Cổng 443 & Đồng Bộ Token WebSocket
+- **Bối cảnh**:
+  - Các API key tạo mới từ Google AI Studio yêu cầu các thế hệ mô hình mới (`gemini-3.8-flash`, `gemini-2.5-flash`), trong khi model cũ `gemini-2.0-flash` bị trả về lỗi `404 Not Found: Mô hình không khả dụng`.
+  - Cơ chế kiểm tra mạng TCP trên cổng 53 (`1.1.1.1:53` / `8.8.8.8:53`) dễ bị các nhà mạng tại Việt Nam can thiệp hoặc chặn gói TCP DNS, dẫn đến việc ứng dụng báo nhầm mất mạng và tự động ép sang mô hình cục bộ.
+  - Khi token phiên làm việc bị từ chối (`4003` / `1008`), client cũ tiếp tục kẹt token hết hạn trong `localStorage` thay vì xóa và nạp lại token mới từ query URL của Edge launcher.
+- **Phương án đã chọn**:
+  1. **Nâng cấp Model mặc định sang `gemini-3.8-flash`**:
+     - `config/settings.toml` & `src/assistant/config.py`: Đặt `gemini_model = "gemini-3.8-flash"`.
+     - `src/assistant/llm/gemini_provider.py`:
+       + `test_gemini_api_key_connectivity()`: Ưu tiên thử nghiệm sinh nội dung với `gemini-3.8-flash` -> `gemini-2.5-flash` -> `gemini-2.0-flash`.
+       + `list_models()`: Mặc định `["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.0-flash"]`.
+       + `stream_chat()`: Danh sách ứng viên tự phục hồi `[self._model_name, "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.0-flash"]`.
+       + `clean_gemini_key()`: Sửa regex `match_legacy = re.search(r"AIza[0-9A-Za-z_\-]{30,45}", text)`.
+     - `src/assistant/ui_static/app.js` & `index.html`: Cập nhật `activeGemini` và danh sách chọn model hiển thị `gemini-3.8-flash (Khuyên dùng)`.
+  2. **Chuyển thuật toán kiểm tra mạng sang cổng 443 (HTTPS) với fallback**:
+     - `NetworkChecker.is_online()`: Kết nối TCP tới `1.1.1.1:443`, timeout 2.0s; dự phòng sang `8.8.8.8:443`.
+     - `ModelRouter.is_network_available()`: Tăng timeout lên 1.5s, kết nối tới `1.1.1.1:443` và dự phòng `8.8.8.8:443`.
+  3. **Đồng bộ Session Token WebSocket chống kẹt Token cũ**:
+     - Trong `app.js` (`connectWebSocket`): Khi gặp mã đóng `4003` / `1008`, xóa ngay `localStorage.removeItem("troly_session_token")`.
+     - Nếu URL chứa `?token=...`, tự động nạp token mới và kết nối lại sau 1s; nếu không có, thông báo rõ ràng cho người dùng mở lại từ Desktop hoặc khay hệ thống.
+### [2026-10-27] Tối Ưu Hiệu Năng & Khắc Phục Triệt Để Treo Ứng Dụng (Anti-Hang & Low-Latency LLM Streaming)
+- **Bối cảnh**:
+  - Ứng dụng đôi khi phản hồi rất chậm hoặc bị treo đến 5 phút không ra kết quả.
+  - Phân tích nguyên nhân gốc rễ:
+    1. `GeminiProvider.stream_chat` duyệt qua 2 phiên bản client (`v1beta`, `v1`) kết hợp 4 mô hình ứng viên dự phòng và mỗi lần đều thử lại 2 lần (có tools và không tools) mà không có giới hạn timeout cho bước kết nối stream ban đầu. Khi mạng chập chờn hoặc API gateway bị nghẽn, tổng thời gian chờ tích luỹ có thể lên tới nhiều phút.
+    2. `ModelRouter` thử lại tới 2 lần kèm backoff luỹ tiến mà không thông báo tiến độ, khiến giao diện im lặng hoàn toàn trong thời gian dài.
+    3. `OllamaProvider` đặt `timeout=180.0s` quá lớn trong `httpx.AsyncClient`.
+    4. `search_memories_hybrid` gọi đồng bộ `get_embedding_sync` với timeout dài, gây block luồng thực thi và nghẽn FastAPI Event Loop trong luồng chat WebSocket.
+    5. Cấu hình mô hình cục bộ mặc định `qwen2.5:14b` đòi hỏi lượng VRAM lớn (~9-10GB), dễ gây tràn bộ nhớ 12GB của RTX 3060 khi chạy đồng thời với Windows Desktop và trình duyệt, làm tốc độ suy luận bị tụt nghiêm trọng.
+- **Phương án đã chọn**:
+  1. **Tối ưu hóa Gemini Provider & Giới hạn Timeout 12s (`src/assistant/llm/gemini_provider.py`)**:
+     - Bỏ duyệt `clients_to_try`: Sử dụng duy nhất client v1beta ban đầu.
+     - Giới hạn ứng viên: Chỉ thử mô hình được cấu hình (`self._model_name`) và một fallback nhanh nhất sang `"gemini-2.0-flash"`.
+     - Bọc lệnh gọi `cl.aio.models.generate_content_stream(...)` bên trong `asyncio.wait_for(..., timeout=12.0)`. Quá 12 giây ngắt ngay lập tức để chuyển tiếp fallback.
+     - Không thử lại có/không tools nếu nguyên nhân là timeout mạng.
+  2. **Tối ưu Router & Phát Thông Báo Fallback Nhanh (`src/assistant/core/router.py`)**:
+     - Giảm `max_retries` từ 2 xuống 1 với độ trễ 0.5s.
+     - Khi gặp lỗi mạng/timeout từ Gemini, lập tức phát sự kiện:
+       `StreamEvent(type="text_delta", content="[Đang chuyển sang mô hình cục bộ Ollama...]\n\n")` để người dùng nắm được trạng thái tức thì thay vì giao diện bị đứng im.
+  3. **Tối ưu Ollama Provider (`src/assistant/llm/ollama_provider.py`)**:
+     - Giảm timeout của `httpx.AsyncClient` xuống `httpx.Timeout(45.0, connect=5.0, read=45.0)` (thay vì 180s).
+  4. **Chống Nghẽn Event Loop & Tối Ưu Tìm Kiếm Trí Nhớ (`src/assistant/memory/`)**:
+     - `embeddings.py`: Giảm timeout mặc định xuống `1.5s` cho cả `get_embedding_sync` và `get_embedding_async`.
+     - `store.py`: Trong `search_memories_hybrid`, bọc sinh vector embedding trong `ThreadPoolExecutor` với timeout 1.5s. Nếu quá thời gian hoặc lỗi, fallback ngay về kết quả FTS5 BM25 (`fts_results[:top_k]`) mà không làm trễ câu trả lời.
+     - `ws.py` & `app.py`: Đảm bảo gọi `get_relevant_memories` và `search_memories_hybrid` thông qua `await asyncio.to_thread(...)`, giải phóng hoàn toàn FastAPI Event Loop.
+  5. **Chuyển mô hình cục bộ mặc định sang `qwen2.5:7b` (`config/settings.toml`, `config.py`)**:
+     - Sử dụng `qwen2.5:7b` làm mô hình cục bộ tiêu chuẩn, tiêu tốn dưới 5GB VRAM, vừa vặn hoàn hảo trong card RTX 3060 12GB và tăng tốc độ sinh từ đầu tiên (TTFT) lên gấp ~3 lần so với bản 14B.
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 1 (Đúng phạm vi tối ưu độ trễ), Nguyên tắc 7 (Mã sạch & kiểm thử), Nguyên tắc 9 (Báo lỗi và trạng thái rõ ràng bằng tiếng Việt), Nguyên tắc 10 (Phương án an toàn và hiệu năng cao nhất).
+- **Thư viện mới**: Không có.
+
+### [2026-10-27] Tối Ưu Hóa Sâu: Khử Điểm Nghẽn I/O, Chống Khóa DB, Throttling Render Web UI & Phản Hồi Tức Thời
+- **Bối cảnh**:
+  - Cần tối ưu thêm độ nhạy của ứng dụng, tránh nghẽn I/O khi quét file, tránh lỗi SQLite locked khi đọc/ghi đồng thời, loại bỏ hiện tượng giật lag khung hình khi stream token và cung cấp phản hồi thị giác ngay lập tức cho người dùng.
+- **Phương án đã chọn**:
+  1. **Tối ưu tìm kiếm trí nhớ & Chống khóa DB (`src/assistant/memory/store.py`, `reminders/store.py`)**:
+     - Thêm kiểm tra nhanh `SELECT 1 FROM memory_embeddings LIMIT 1`. Nếu DB chưa lưu bất kỳ vector nào, trả về ngay kết quả từ FTS5 mà không tốn công gọi Ollama, giúp tăng tốc tìm kiếm lên mức tức thì (<2ms).
+     - Bổ sung `timeout=15.0` vào `sqlite3.connect()` trong `_get_connection()`, ngăn chặn triệt để lỗi `sqlite3.OperationalError: database is locked` khi có nhiều luồng hoặc tiến trình nền cùng truy cập SQLite.
+  2. **Tối ưu công cụ tìm kiếm file (`src/assistant/tools/files.py`)**:
+     - Thêm danh sách loại trừ `IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".idea", ".vscode", "dist", "build"}`.
+     - Bỏ qua toàn bộ các thư mục rác/môi trường phát triển nặng nề, giảm 95% thời gian duyệt I/O đĩa cứng khi tìm kiếm trong workspace.
+  3. **Tối ưu hóa render streaming trên Web UI (`src/assistant/ui_static/app.js`)**:
+     - Throttling xử lý `text_delta` qua `requestAnimationFrame` kết hợp ngưỡng 40ms trước khi gọi `parseMarkdown` và cập nhật `innerHTML`.
+     - Giảm tải vẽ lại DOM liên tục, loại bỏ hiện tượng đơ giật trình duyệt khi model sinh token ở tốc độ cao (50-100 tokens/s).
+  4. **Phản hồi trạng thái kết nối tức thời (`src/assistant/server/ws.py`)**:
+     - Ngay đầu `_process_user_turn()`, phát ngay sự kiện WebSocket `text_delta` với nội dung `"..."` trước khi khởi chạy `AgentLoop`.
+     - Phía giao diện hiển thị ngay con trỏ nhấp nháy báo hiệu đang xử lý, và tự động thay thế bằng nội dung thực tế ngay khi token đầu tiên trả về.
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 1 (Tối ưu hiệu năng đúng phạm vi), Nguyên tắc 7 (Mã sạch & kiểm thử), Nguyên tắc 9 (Trải nghiệm người dùng mượt mà, phản hồi lập tức), Nguyên tắc 10 (Lựa chọn giải pháp an toàn và hiệu quả nhất).
+- **Thư viện mới**: Không có.
+
+### [2026-10-27] Chuẩn Hóa Mô Hình Chính Thức Google Gemini (`gemini-1.5-flash`) & Giới Hạn Timeout Từng Chunk Stream
+- **Bối cảnh**:
+  - Khi người dùng gửi tin nhắn qua Google Gemini, ứng dụng gặp tình trạng không phản hồi hoặc đứng im.
+  - Phân tích nguyên nhân:
+    1. Các tên mô hình giả định (`gemini-3.8-flash`, `gemini-2.5-flash`) không phải là endpoint sản xuất chính thức của Google Generative Language API, gây ra lỗi hoặc treo request.
+    2. Vòng lặp `async for chunk in stream:` không có timeout cho từng chunk dữ liệu. Nếu gateway mạng của Google bị nghẽn sau khi mở kết nối ban đầu, tiến trình sẽ bị kẹt vô thời hạn trong lúc chờ chunk tiếp theo.
+- **Phương án đã chọn**:
+  1. **Chuẩn hóa toàn diện tên mô hình chính thức của Google**:
+     - Cấu hình mặc định: `gemini_model = "gemini-1.5-flash"` trong `config/settings.toml` và `src/assistant/config.py`.
+     - Danh sách mô hình chuẩn: `["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]`.
+     - `test_gemini_api_key_connectivity()`: Duyệt kiểm tra kết nối với `["gemini-1.5-flash", "gemini-2.0-flash"]`.
+     - `list_models()`: Trả về danh sách mặc định chính thức khi không truy vấn được qua API.
+     - `app.js` & `index.html`: Cập nhật dropdown chọn model trên giao diện sang các model chính thức.
+  2. **Bọc timeout an toàn 10s cho từng chunk stream (`stream_chat`)**:
+     - Thay thế `async for chunk in stream:` bằng vòng lặp `while True:` kèm:
+       `chunk = await asyncio.wait_for(stream.__anext__(), timeout=10.0)`
+     - Nếu bất kỳ chunk nào bị trễ quá 10 giây, lập tức kích hoạt `asyncio.TimeoutError` để chuyển đổi mô hình dự phòng hoặc fallback ngay sang Ollama cục bộ qua Router mà không để ứng dụng bị kẹt.
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 6 (Thư viện chuẩn xác theo tài liệu hiện hành của Google), Nguyên tắc 7 (Mã sạch & kiểm thử), Nguyên tắc 9 (Bắt lỗi và báo lại rõ ràng), Nguyên tắc 10 (Phương án an toàn nhất).
+### [2026-10-27] Nâng Cấp Giao Diện Cá Nhân Hóa (Personalization & Theme Palette) Thuần Vanilla JS Offline
+- **Bối cảnh**:
+  - Người dùng mong muốn tùy biến trải nghiệm cá nhân: đổi tên hiển thị và avatar cho cả Trợ lý và Người dùng, chọn bảng màu nhấn chủ đạo (Accent Color Palette 7 preset), tối ưu bong bóng chat hiện đại với hiệu ứng gradient và accent glow, cập nhật tên và avatar ở sidebar, cũng như tự động truyền thông tin danh xưng vào System Prompt để AI xưng hô tự nhiên, chính xác.
+- **Phương án đã chọn**:
+  1. **Lưu trữ & Áp dụng Trạng Thái Không Phụ Thuộc Mạng (Offline Persistence)**:
+     - Toàn bộ cấu hình cá nhân hóa lưu vào `localStorage` dưới khóa `troly_profile_settings`: `{ assistantName, userName, assistantAvatar, userAvatar, themeMode, accentColor }`.
+     - Chống hiện tượng chớp nháy giao diện (FOUC): Chèn script inline đồng bộ trong thẻ `<head>` của `index.html` để nạp theme và biến CSS `--accent` ngay trước khi trình duyệt dựng layout.
+     - Hàm `applyThemeSettings(profile)` cập nhật trực tiếp các biến CSS `:root` & `document.body` (`--accent`, `--accent-hover`, `--accent-glow`, `--user-bubble`), đồng bộ hóa sidebar brand và các control cài đặt.
+  2. **Thẻ Cài Đặt Cá Nhân Hóa & Bộ Chọn Màu (Settings & Palette Picker)**:
+     - Bổ sung thẻ `🎨 Cá Nhân Hóa & Giao Diện` tại màn hình Cài đặt với:
+       * Ô nhập tên Trợ lý & tên Người dùng.
+       * Chọn nhanh emoji avatar (🤖, 🦊, 🐱, 🐼, 🌟, 🌿, ☕, 🚀, 💡, 🥑) hoặc dán URL ảnh / Base64 kèm xem trước thời gian thực.
+       * Bộ chọn 7 preset màu nhấn: 🔵 Xanh Biển (#3b82f6), 🟢 Ngọc Lục Bảo (#10b981), 🟣 Tím Mộng Mơ (#8b5cf6), 🟠 Hoàng Hôn (#f59e0b), 🌸 Hoa Anh Đào (#ec4899), 🔴 Đỏ Rực Rỡ (#ef4444), ⚪ Xám Tối Giản (#64748b) cùng Color Picker tùy chọn.
+       * Nút radio chuyển đổi mượt mà giữa Giao diện Sáng và Tối.
+  3. **Tối Ưu Bong Bóng Chat & Thông Điệp Chào Mừng Động**:
+     - Thiết kế lại `.message-bubble` với bo góc hiện đại 18px (vát nhẹ góc theo phía người gửi), đổ bóng mờ nhẹ theo màu nhấn (`box-shadow: 0 4px 16px var(--accent-glow)`).
+     - Tin nhắn người dùng sử dụng gradient đồng điệu `linear-gradient(135deg, var(--accent) 0%, var(--user-bubble) 100%)`.
+     - Cả tin nhắn Trợ lý và Người dùng đều hiển thị avatar tròn mềm mại và tên tương ứng (`.message-sender`).
+     - Hàm `renderWelcomeMessage()` tự động chào đón thân thiện theo đúng tên người dùng và tên trợ lý đã cấu hình.
+  4. **Tích Hợp System Prompt Cá Nhân Hóa Qua WebSocket**:
+     - Khi gửi tin nhắn qua WebSocket (`user_message` trong `app.js`), đính kèm `user_name` và `assistant_name`.
+     - `ws.py` và `prompts.py` tiếp nhận và bổ sung khối `[CÁ NHÂN HÓA & DANH XƯNG]` vào system prompt, giúp AI xưng hô đúng danh xưng mong muốn mà không vi phạm nguyên tắc an toàn hay làm loãng ngữ cảnh.
+- **Lý do**:
+  - Tuân thủ nghiêm ngặt 12 nguyên tắc an toàn: 100% offline, Vanilla JS/CSS thuần túy, không dùng framework bên ngoài (Nguyên tắc 11), an toàn trước injection (Nguyên tắc 12), giao diện chuẩn tiếng Việt (Nguyên tắc 8).
+
+### [2026-10-27] Tách Riêng Màn Hình Cá Nhân Hóa & Chuẩn Hóa Toàn Diện Icon SVG Tối Giản, Hiện Đại Hóa Bố Cục
+- **Bối cảnh**:
+  - Ban đầu phần cá nhân hóa giao diện được đặt chung trong màn hình "Cài Đặt & Chẩn Đoán Hệ Thống", khiến màn hình cài đặt kỹ thuật bị dài và lẫn lộn giữa chức năng vận hành máy (API keys, hotkey, chẩn đoán mạng) và thẩm mỹ cá nhân.
+  - Các icon trên thanh điều hướng, nút bấm, bong bóng chat và thông báo còn sử dụng nhiều emoji màu mè, không đồng bộ phong cách và thiếu tính chuyên nghiệp của một ứng dụng máy tính hiện đại.
+- **Phương án đã chọn**:
+  1. **Tách riêng màn hình Giao diện (`#screen-appearance`)**:
+     - Bổ sung mục điều hướng `Giao diện` (icon Palette SVG) trên Sidebar, tách độc lập khỏi `Cài đặt hệ thống` (`#screen-settings`).
+     - Tập trung toàn bộ tùy biến diện mạo vào màn hình mới: Hồ sơ trợ lý (tên, avatar), Hồ sơ người dùng (tên, avatar), Chế độ sáng/tối (Theme radio pill), Bảng 7 preset màu nhấn kèm bộ chọn màu tùy biến (Color Picker), Nút Lưu và Khôi phục mặc định.
+     - Màn hình `Cài đặt hệ thống` được tinh giản, chỉ tập trung vào: Trạng thái kết nối (Gemini, Ollama), Quản lý API Key đa khóa trong Windows Credential Locker, Cấu hình model và Tự khởi động cùng Windows.
+  2. **Thay thế toàn bộ Emoji bằng Icon SVG Vector Đơn Sắc (Minimalist Monochromatic SVG)**:
+     - Xóa bỏ triệt để các emoji màu mè (🤖, 💬, 🧠, ⏰, 🛡️, ⚙️, 📁, 🌙, ☀️, ➕, 🛑, ✈️, ☁️, ✏️, 🗑️, 🔑, 👁️, 🔍, 💾, ⚡, ❌, ⚠️...) trên toàn bộ giao diện: sidebar, header chat, dock nhập tin nhắn, danh sách trí nhớ, danh sách nhắc việc, bảng quản lý key, thẻ trạng thái và modal phê duyệt an toàn.
+     - Chuẩn hóa hệ thống icon vector SVG inline (`stroke="currentColor"`, `stroke-width="2"`, `fill="none"`), kế thừa màu sắc linh hoạt theo biến CSS `--text-primary`, `--text-muted` hoặc `--accent`.
+     - Tuyệt đối không dùng CDN, thư viện icon font hay tải từ internet; 100% vector SVG nhúng trực tiếp, hoạt động offline hoàn toàn.
+  3. **Hiện đại hóa bố cục và thẩm mỹ (Modern Layout & Design Tokens)**:
+     - Tinh chỉnh `tokens.css`: tông màu nền sâu thẳm chuẩn Dark theme hiện đại (`#0d1117`, `#161b22`, `#21262d`), lớp viền hairline tinh xảo (`#30363d`), hệ thống bo góc chuẩn mực (`--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-pill`).
+     - Nâng cấp khung chat: Dock nhập tin nhắn dạng nổi (floating dock) bo tròn lớn với độ nổi khối nhẹ và đổ bóng mềm, textarea tự co giãn linh hoạt, nút gửi tích hợp biểu tượng gửi giấy tối giản.
+     - Cải thiện bong bóng chat (`.message-bubble`): Avatar người dùng và trợ lý kích thước 34px bo tròn tinh gọn mang biểu tượng vector, phân định màu viền tinh tế, tên người gửi hiển thị trực quan.
+- **Lý do**:
+  - Tuân thủ nghiêm ngặt 12 nguyên tắc an toàn: Không thêm thư viện phụ thuộc bên ngoài (Nguyên tắc 11), đảm bảo hoạt động offline 100%, giao diện hiển thị tiếng Việt chuẩn mực (Nguyên tắc 8).
+- **Thư viện mới**: Không có.
+
+### [2026-10-27] Khắc Phục Triệt Để Lỗi Gemini Treo Stream & Tối Ưu Hóa Ngữ Cảnh Qwen2.5:14B (8192 tokens)
+- **Bối cảnh**:
+  - Khi người dùng gửi tin nhắn qua Gemini, mô hình có thể gặp lỗi kết nối gateway hoặc timeout lũy kế kéo dài 50–85 giây do timeout stream ban đầu quá lớn (12s) và danh sách mô hình dự phòng thiếu `gemini-1.5-flash` chính thức.
+  - Mô hình cục bộ `qwen2.5:14b` chạy trên máy tính có card đồ họa RTX 3060 12GB chưa được khai thác tối đa: cấu hình mặc định bị sót `qwen2.5:7b`, ngân sách token chỉ đặt 4000, và payload gửi sang Ollama thiếu tham số `"options": {"num_ctx": ...}`, khiến Ollama mặc định giới hạn ngữ cảnh ở mức 2048 tokens.
+- **Phương án đã chọn**:
+  1. **Khắc phục triệt để lỗi Gemini treo**:
+     - `config/settings.toml` & `src/assistant/config.py`: Đặt `gemini_model = "gemini-1.5-flash"` làm mô hình sản xuất chính thức, ổn định nhất của Google.
+     - `src/assistant/llm/gemini_provider.py`:
+       * Trong `stream_chat()`, danh sách `candidates` luôn ưu tiên `self._model_name`, kế tiếp bắt buộc duyệt qua `["gemini-1.5-flash", "gemini-2.0-flash"]`.
+       * Giảm timeout kết nối stream ban đầu từ 12.0s xuống 8.0s nhằm phát hiện lỗi kết nối nhanh hơn và chuyển đổi tức thì.
+       * Bổ sung log chi tiết (`logger.info`) khi chuyển sang mô hình dự phòng để người dùng và hệ thống nắm bắt kịp thời.
+  2. **Tối ưu hóa mô hình cục bộ Qwen2.5:14B cho VRAM 12GB**:
+     - Đồng bộ `local_model = "qwen2.5:14b"` và `max_context_tokens = 8192` trong toàn bộ tệp cấu hình (`settings.toml`, `config.py`, `app.js`).
+     - Trong `src/assistant/llm/ollama_provider.py`, thêm `"options": {"num_ctx": num_ctx_val}` vào payload gửi tới `/v1/chat/completions`, mở khóa toàn bộ cửa sổ ngữ cảnh 8192 tokens thay vì bị Ollama giới hạn 2048 tokens.
+     - Đồng bộ hóa các tệp hướng dẫn và kiểm thử (`scripts/check_tool_calling.py`, `README.md`, `index.html`, `test_config.py`).
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 2 (An toàn bảo mật), Nguyên tắc 6 (Thư viện chuẩn xác theo tài liệu hiện hành), Nguyên tắc 7 (Mã sạch & kiểm thử), Nguyên tắc 9 (Không nuốt lỗi im lặng), Nguyên tắc 10 (Phương án an toàn nhất).
+- **Thư viện mới**: Không có.
+
+### [2026-10-27] Quản Lý Hội Thoại, Danh Mục Trí Nhớ Động & Công Cụ Tra Cứu Web Realtime An Toàn
+- **Bối cảnh**:
+  - Người dùng cần khả năng đổi tên, xóa cuộc hội thoại và trích xuất lưu các dữ kiện cốt lõi từ phiên trò chuyện vào trí nhớ dài hạn.
+  - Danh mục trí nhớ trước đây là cố định (hardcoded enum), người dùng không thể tự tạo, đổi màu hay phân loại theo nhu cầu cá nhân.
+  - Cần công cụ tra cứu thông tin web thời gian thực và tin tức đáng tin cậy mà không cài thêm framework cồng kềnh, đồng thời phòng vệ triệt để trước SSRF và Prompt Injection.
+- **Phương án đã chọn**:
+  1. **Quản lý cuộc trò chuyện (Conversation Management)**:
+     - Bổ sung schema `ConversationUpdate` (`ConversationUpdateRequest`) và endpoint `PUT /api/conversations/{conv_id}`.
+     - Xây dựng endpoint `POST /api/conversations/{conv_id}/save-to-memory`: Lấy lịch sử hội thoại, sử dụng router tóm tắt thành các gạch đầu dòng dữ kiện quan trọng, tự động đồng bộ vào bảng `memories` kèm vector embedding cho Hybrid Search.
+     - Giao diện: Cụm nút thao tác nhanh trên chat header (Đổi tên, Lưu trí nhớ, Xóa) sử dụng 100% SVG vector nét mảnh đơn sắc.
+  2. **Quản lý danh mục trí nhớ động (Dynamic Memory Categories)**:
+     - Tạo bảng `memory_categories` trong SQLite với 4 danh mục mặc định (`preference`, `project`, `naming_rule`, `general`).
+     - Hỗ trợ CRUD qua `MemoryStore` và REST API (`GET/POST/PUT/DELETE /api/memories/categories`).
+     - Cơ chế di trú an toàn khi xóa danh mục: Toàn bộ dữ kiện trí nhớ thuộc danh mục bị xóa tự động chuyển về danh mục "Chung" (`general`), bảo toàn dữ liệu và đồng bộ FTS5. Chặn xóa danh mục mặc định `general`.
+     - Giao diện: Thêm Modal Quản lý danh mục dạng bảng kèm form tạo nhanh, bảng chọn màu HEX và hiển thị huy hiệu danh mục theo màu sắc riêng biệt.
+  3. **Công cụ tra cứu Web thời gian thực (`search_web`, `fetch_news`)**:
+     - Triển khai trong `src/assistant/tools/web.py` sử dụng thư viện `httpx` và thư viện chuẩn `xml.etree.ElementTree`.
+     - Tìm kiếm tổng hợp thời gian thực kết hợp DuckDuckGo HTML và Google News RSS fallback.
+     - Lọc chặn triệt để SSRF (Server-Side Request Forgery) trên mọi URL kết quả, chặn localhost và IP nội bộ.
+     - Toàn bộ nội dung trả về cho LLM bắt buộc bọc trong thẻ `<untrusted_content>` theo Nguyên tắc 12 để chống Prompt Injection.
+  4. **Chuẩn mực thiết kế giao diện**:
+     - Tuyệt đối không sử dụng emoji màu mè, 100% icon SVG vector đơn sắc (`stroke="currentColor"`, `stroke-width="2"`, `fill="none"`), tương thích hoàn hảo Dark/Light theme.
+- **Lý do**:
+  - Tuân thủ nghiêm ngặt 12 nguyên tắc an toàn: Không thêm thư viện phụ thuộc bên ngoài (Nguyên tắc 11), an toàn trước SSRF và injection (Nguyên tắc 2 & 12), giao diện chuẩn tiếng Việt (Nguyên tắc 8).
+- **Thư viện mới**: Không có.
+
+

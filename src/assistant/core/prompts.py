@@ -52,8 +52,10 @@ def get_system_prompt(
     custom_instructions: str | None = None,
     timezone_str: str = "Asia/Ho_Chi_Minh",
     memories: list[dict] | None = None,
+    user_name: str | None = None,
+    assistant_name: str | None = None,
 ) -> str:
-    """Tạo prompt hệ thống hoàn chỉnh chứa thời gian hiện tại, quy tắc an toàn và trí nhớ dài hạn."""
+    """Tạo prompt hệ thống hoàn chỉnh chứa thời gian hiện tại, quy tắc an toàn, trí nhớ dài hạn và cá nhân hóa."""
     from assistant.safety.injection import get_anti_injection_instructions
 
     time_str = get_current_time_str(timezone_str)
@@ -62,6 +64,17 @@ def get_system_prompt(
         f"\n[THÔNG TIN HỆ THỐNG]\nThời gian hiện tại: {time_str}",
         f"\n{get_anti_injection_instructions()}",
     ]
+
+    # Cá nhân hóa danh xưng người dùng & tên trợ lý
+    naming_lines = []
+    if assistant_name and assistant_name.strip():
+        clean_ast = assistant_name.strip()
+        naming_lines.append(f"- Tên của bạn (Trợ lý): \"{clean_ast}\". Hãy xưng hô là \"{clean_ast}\" hoặc \"tôi\" một cách thân thiện.")
+    if user_name and user_name.strip():
+        clean_user = user_name.strip()
+        naming_lines.append(f"- Tên người dùng: \"{clean_user}\". Hãy gọi người dùng là \"{clean_user}\" hoặc xưng hô lịch sự, tôn trọng.")
+    if naming_lines:
+        prompt_parts.append("\n[CÁ NHÂN HÓA & DANH XƯNG]\n" + "\n".join(naming_lines))
 
     # Chèn trí nhớ dài hạn về người dùng nếu có
     if memories:
@@ -78,5 +91,6 @@ def get_system_prompt(
         prompt_parts.append(f"\n[CHỈ DẪN BỔ SUNG]\n{custom_instructions.strip()}")
 
     return "\n".join(prompt_parts)
+
 
 

@@ -44,7 +44,7 @@ echo ========================================================
 echo.
 echo Ban co the chay thu cac tinh nang moi:
 echo   - assistant chat      (Tro chuyen, tao file, mo app, chay lenh co xac nhan)
-echo   - python scripts\check_tool_calling.py --model qwen2.5:7b (Kiem tra tool calling cua model)
+echo   - python scripts\check_tool_calling.py --model qwen2.5:14b (Kiem tra tool calling cua model)
 echo ========================================================
 pause
 

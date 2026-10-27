@@ -175,6 +175,19 @@ def test_hybrid_search_fallback_when_ollama_offline(tmp_path: Path) -> None:
         assert any("Python" in r["content"] for r in results)
 
 
+def test_hybrid_search_skips_embedding_call_when_no_vectors_in_db(tmp_path: Path) -> None:
+    """Kiểm tra khi chưa có vector nào trong database thì không gọi Ollama sinh embedding (tối ưu hóa)."""
+    db_file = tmp_path / "test_no_vectors.db"
+    store = MemoryStore(db_path=db_file)
+    store.add_memory(category="general", content="Ghi chú quan trọng về kiến trúc phần mềm")
+
+    with patch("assistant.memory.store.get_embedding_sync") as mock_emb:
+        results = store.search_memories_hybrid("kiến trúc", top_k=5)
+        mock_emb.assert_not_called()
+        assert len(results) == 1
+        assert "kiến trúc" in results[0]["content"]
+
+
 def test_hybrid_search_empty_database_and_blank_query(tmp_path: Path) -> None:
     """Kiểm tra trường hợp truy vấn rỗng hoặc database chưa có dữ liệu."""
     db_file = tmp_path / "test_empty.db"

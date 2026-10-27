@@ -9,6 +9,7 @@ from assistant.llm.gemini_provider import (
     GeminiProvider,
     add_gemini_api_key,
     classify_gemini_error,
+    clean_gemini_key,
     delete_gemini_api_key,
     get_gemini_api_key,
     get_gemini_api_keys,
@@ -18,6 +19,15 @@ from assistant.llm.gemini_provider import (
     test_gemini_api_key_connectivity,
 )
 from assistant.safety.secrets import get_secret, save_secret
+
+
+def test_clean_gemini_key_auto_extraction() -> None:
+    """Kiểm tra clean_gemini_key tự động trích xuất đúng 39 ký tự AIzaSy... dù bị dính tiền tố lệnh."""
+    raw = "AIzaSyA12345678901234567890123456789"
+    assert clean_gemini_key(raw) == raw
+    assert clean_gemini_key(f"GEMINI_API_KEY={raw}") == raw
+    assert clean_gemini_key(f'export GEMINI_API_KEY="{raw}"') == raw
+    assert clean_gemini_key(f"Bearer {raw}") == raw
 
 
 def test_get_gemini_api_key_strips_quotes_and_spaces() -> None:
@@ -62,10 +72,10 @@ def test_classify_gemini_error_actionable_messages() -> None:
 
 
 def test_gemini_provider_client_default_v1beta() -> None:
-    """Kiểm tra GeminiProvider sử dụng client chuẩn v1beta mặc định để hỗ trợ gemini-2.0-flash."""
+    """Kiểm tra GeminiProvider sử dụng client chuẩn v1beta mặc định để hỗ trợ gemini-1.5-flash."""
     with patch("assistant.llm.gemini_provider.get_gemini_api_key", return_value="AIzaSyValidDummyKey"):
         provider = GeminiProvider()
-        assert provider.default_model == "gemini-2.0-flash" or "gemini" in provider.default_model
+        assert provider.default_model == "gemini-1.5-flash" or "gemini" in provider.default_model
         with patch("google.genai.Client") as mock_client_cls:
             provider._get_client()
             mock_client_cls.assert_called_once_with(api_key="AIzaSyValidDummyKey")
@@ -150,9 +160,56 @@ def test_gemini_key_connectivity_failure() -> None:
         mock_client_cls.return_value = mock_client
         mock_client.models.generate_content.side_effect = Exception("400 Bad Request: API_KEY_INVALID")
 
-        ok, msg = test_gemini_api_key_connectivity("AIzaSyBadKey")
+        ok, msg = test_gemini_api_key_connectivity("AIzaSyBadKey1234567890123456789012345")
         assert ok is False
         assert "không hợp lệ" in msg
+
+
+def test_gemini_key_connectivity_masked_key_rejection() -> None:
+    """Kiểm tra: Nếu người dùng copy nhầm chuỗi bị che dấu chấm '...bM_Q' thì báo rõ ràng."""
+    ok, msg = test_gemini_api_key_connectivity("...bM_Q")
+    assert ok is False
+    assert "bị che bớt" in msg or "BIỂU TƯỢNG SAO CHÉP" in msg
+
+
+def test_gemini_key_connectivity_invalid_prefix() -> None:
+    """Kiểm tra: Nếu người dùng dán khóa OpenAI sk-... hoặc chuỗi không bắt đầu bằng AIzaSy."""
+    ok_sk, msg_sk = test_gemini_api_key_connectivity("sk-proj-12345678901234567890")
+    assert ok_sk is False
+    assert "OpenAI" in msg_sk
+
+    ok_other, msg_other = test_gemini_api_key_connectivity("some_random_key_1234567890123456")
+    assert ok_other is False
+    assert "AIzaSy" in msg_other
+
+
+def test_add_gemini_api_key_masked_and_prefix_validation() -> None:
+    """Kiểm tra add_gemini_api_key từ chối khóa bị che dấu chấm hoặc không đúng định dạng AIzaSy / AQ."""
+    with pytest.raises(ValueError, match="bị che bớt"):
+        add_gemini_api_key("...bM_Q")
+
+    with pytest.raises(ValueError, match="AIzaSy"):
+        add_gemini_api_key("invalid_key_without_aizasy")
+
+
+def test_gemini_auth_key_aq_format_support() -> None:
+    """Kiểm tra hỗ trợ định dạng khóa ủy quyền mới từ Google AI Studio bắt đầu bằng 'AQ.'."""
+    sample_aq_key = "AQ.MockKeyForUnitTestingOnly1234567890abcdefXYZ"
+
+    # 1. Trích xuất tự động kể cả khi dính lệnh
+    assert clean_gemini_key(sample_aq_key) == sample_aq_key
+    assert clean_gemini_key(f"GEMINI_API_KEY={sample_aq_key}") == sample_aq_key
+    assert clean_gemini_key(f'export GEMINI_API_KEY="{sample_aq_key}"') == sample_aq_key
+
+    # 2. Che giấu an toàn
+    assert mask_api_key(sample_aq_key) == "AQ.MockK...fXYZ"
+
+    # 3. Thêm khóa thành công
+    with patch("keyring.get_password", return_value="[]"), patch("keyring.set_password"):
+        item = add_gemini_api_key(sample_aq_key, "Khóa Google AI Studio Mới")
+        assert item["name"] == "Khóa Google AI Studio Mới"
+        assert item["key"] == sample_aq_key
+        assert item["is_active"] is True
 
 
 def test_clean_schema_for_gemini_compatibility() -> None:

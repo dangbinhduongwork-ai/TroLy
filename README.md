@@ -192,8 +192,8 @@ assistant ui --no-browser
 ### Bước 13: Kiểm định khả năng gọi công cụ của Model
 Chạy script kiểm tra xem mô hình có gọi đúng công cụ tạo file hay không:
 ```powershell
-python scripts/check_tool_calling.py --model qwen2.5:7b
-python scripts/check_tool_calling.py --model gemini-2.5-flash --provider gemini
+python scripts/check_tool_calling.py --model qwen2.5:14b
+python scripts/check_tool_calling.py --model gemini-1.5-flash --provider gemini
 ```
 
 ---
@@ -238,7 +238,7 @@ Sau khi đóng gói hoàn tất:
 1. Tải và cài đặt Ollama từ [ollama.com](https://ollama.com).
 2. Kéo mô hình bạn muốn dùng về máy bằng terminal:
    ```powershell
-   ollama pull qwen2.5:7b
+   ollama pull qwen2.5:14b
    # hoặc:
    ollama pull llama3.2:3b
    ```

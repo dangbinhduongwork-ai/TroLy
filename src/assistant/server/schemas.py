@@ -46,6 +46,10 @@ class ConversationUpdate(BaseModel):
     is_sensitive: bool | None = None
 
 
+# Bí danh tương thích
+ConversationUpdateRequest = ConversationUpdate
+
+
 class ConversationItem(BaseModel):
     """Thông tin tóm tắt của một cuộc hội thoại."""
 
@@ -96,6 +100,38 @@ class MemoryItem(BaseModel):
     source_conv_id: str | None = None
     created_at: str
     updated_at: str
+
+
+# =============================================================================
+# DANH MỤC TRÍ NHỚ (MEMORY CATEGORIES)
+# =============================================================================
+
+class CategoryCreateRequest(BaseModel):
+    """Yêu cầu thêm danh mục trí nhớ mới."""
+
+    name: str = Field(..., min_length=1, description="Mã định danh danh mục (slug)")
+    label: str = Field(..., min_length=1, description="Tên nhãn hiển thị tiếng Việt")
+    icon: str = Field(default="tag", description="Tên biểu tượng icon (heart, briefcase, code, info, tag...)")
+    color: str = Field(default="#3b82f6", description="Mã màu HEX đại diện")
+
+
+class CategoryUpdateRequest(BaseModel):
+    """Yêu cầu sửa thông tin danh mục trí nhớ."""
+
+    label: str | None = None
+    icon: str | None = None
+    color: str | None = None
+
+
+class CategoryItem(BaseModel):
+    """Thông tin một danh mục trí nhớ."""
+
+    id: str
+    name: str
+    label: str
+    icon: str
+    color: str
+    created_at: str
 
 
 # =============================================================================

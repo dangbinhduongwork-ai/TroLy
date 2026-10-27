@@ -1,4 +1,6 @@
 @echo off
-chcp 65001 >nul
-title Trợ Lý AI - Khởi Động
+setlocal
+title Tro Ly AI - Khoi Dong
+cd /d "%~dp0"
 call "%~dp0scripts\run_app.bat"
+endlocal

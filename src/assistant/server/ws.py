@@ -144,6 +144,8 @@ class ChatWebSocketManager:
                     conv_id = payload.get("conversation_id")
                     mode = payload.get("mode", "auto")
                     is_sensitive = bool(payload.get("is_sensitive", False))
+                    user_name = payload.get("user_name")
+                    assistant_name = payload.get("assistant_name")
 
                     # Nếu đang có lượt cũ chạy trên websocket này, huỷ trước khi chạy mới
                     if websocket in self.active_tasks and not self.active_tasks[websocket].done():
@@ -156,6 +158,8 @@ class ChatWebSocketManager:
                             conv_id=conv_id,
                             mode=mode,
                             is_sensitive=is_sensitive,
+                            user_name=user_name,
+                            assistant_name=assistant_name,
                         )
                     )
 
@@ -201,8 +205,13 @@ class ChatWebSocketManager:
         conv_id: str | None,
         mode: str,
         is_sensitive: bool,
+        user_name: str | None = None,
+        assistant_name: str | None = None,
     ) -> None:
         """Xử lý một lượt hội thoại từ lúc nhận tin nhắn đến lúc hoàn tất."""
+        # Phản hồi trạng thái tức thời cho client để hiển thị con trỏ kết nối
+        await self._send_event(websocket, "text_delta", {"content": "..."})
+
         # 1. Đảm bảo có conversation_id hợp lệ
         if not conv_id:
             # Tạo cuộc hội thoại mới lấy 30 ký tự đầu làm tiêu đề
@@ -290,7 +299,8 @@ class ChatWebSocketManager:
             await self._send_event(websocket, event_name, payload)
 
         # 7. Lấy danh sách trí nhớ liên quan và khởi tạo System Prompt
-        active_memories = context.get_relevant_memories(
+        active_memories = await asyncio.to_thread(
+            context.get_relevant_memories,
             self.memory_store,
             max_tokens=600,
             max_memories=15,
@@ -299,6 +309,8 @@ class ChatWebSocketManager:
         system_prompt = get_system_prompt(
             timezone_str=self.config.timezone,
             memories=active_memories,
+            user_name=user_name,
+            assistant_name=assistant_name,
         )
         agent_loop = AgentLoop(
             router=self.router,

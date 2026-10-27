@@ -1,8 +1,8 @@
 """Script kiểm tra khả năng gọi công cụ (Tool Calling) của một model cụ thể.
 
 Cách dùng:
-    python scripts/check_tool_calling.py --model qwen2.5:7b
-    python scripts/check_tool_calling.py --model gemini-2.5-flash --provider gemini
+    python scripts/check_tool_calling.py --model qwen2.5:14b
+    python scripts/check_tool_calling.py --model gemini-1.5-flash --provider gemini
 
 Yêu cầu model: "tạo file hello.txt có nội dung xin chào trong workspace".
 Kiểm tra xem file có thực sự xuất hiện không và in ra: PASS hoặc FAIL.
@@ -121,7 +121,7 @@ async def check_tool_calling(model_name: str, provider_name: str | None = None) 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Kiểm tra khả năng Tool Calling của model")
-    parser.add_argument("--model", type=str, required=True, help="Tên model cần kiểm tra (ví dụ: qwen2.5:7b)")
+    parser.add_argument("--model", type=str, required=True, help="Tên model cần kiểm tra (ví dụ: qwen2.5:14b)")
     parser.add_argument("--provider", type=str, choices=["gemini", "ollama"], help="Nhà cung cấp (gemini hoặc ollama)")
 
     args = parser.parse_args()

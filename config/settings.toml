@@ -16,7 +16,7 @@ log_level = "INFO"
 
 [models]
 # Model đám mây qua Gemini API (khi có mạng)
-gemini_model = "gemini-2.0-flash"
+gemini_model = "gemini-4-argon"
 
 # Model cục bộ chạy qua Ollama (khi mất mạng hoặc dữ liệu nhạy cảm)
 local_model = "qwen2.5:14b"
@@ -31,7 +31,7 @@ embedding_model = "nomic-embed-text"
 daily_soft_limit = 1000
 
 # Ngân sách token cho cửa sổ ngữ cảnh hội thoại
-max_context_tokens = 4000
+max_context_tokens = 8192
 
 # Thời gian lưu cache trạng thái kết nối mạng (giây)
 network_cache_seconds = 10

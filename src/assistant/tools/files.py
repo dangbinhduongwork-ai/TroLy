@@ -175,6 +175,19 @@ def rename_path(path: str, new_name: str) -> dict[str, Any]:
         return {"ok": False, "data": None, "error": str(err), "truncated": False}
 
 
+IGNORE_DIRS: set[str] = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".idea",
+    ".vscode",
+    "dist",
+    "build",
+}
+
+
 @register_tool(
     name="search_files",
     description="Tìm kiếm tập tin trong workspace theo tên hoặc theo nội dung bên trong file.",
@@ -191,6 +204,11 @@ def search_files(query: str, search_content: bool = False, max_results: int = 50
         for item in ws.rglob("*"):
             if len(results) >= max_results:
                 break
+
+            # Bỏ qua các thư mục hệ thống/phát triển nặng khi quét để tránh nghẽn I/O đĩa
+            if any(part in IGNORE_DIRS for part in item.parts):
+                continue
+
             if item.is_file():
                 # 1. Tìm theo tên
                 if query_lower in item.name.lower():

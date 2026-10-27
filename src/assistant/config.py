@@ -19,11 +19,11 @@ class Config:
     workspace_dir: Path
     data_dir: Path
     timezone: str = "Asia/Ho_Chi_Minh"
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-1.5-flash"
     local_model: str = "qwen2.5:14b"
     ollama_host: str = "http://127.0.0.1:11434"
     daily_soft_limit: int = 1000
-    max_context_tokens: int = 4000
+    max_context_tokens: int = 8192
     network_cache_seconds: int = 10
     ui_port: int = 8000
     log_level: str = "INFO"
@@ -132,7 +132,7 @@ def load_config(
 
     # 4. models
     gemini_model = (
-        os.getenv("GEMINI_MODEL") or models_sec.get("gemini_model") or "gemini-2.0-flash"
+        os.getenv("GEMINI_MODEL") or models_sec.get("gemini_model") or "gemini-1.5-flash"
     )
     local_model = os.getenv("LOCAL_MODEL") or models_sec.get("local_model") or "qwen2.5:14b"
     ollama_host = (
@@ -148,10 +148,10 @@ def load_config(
 
     try:
         max_context_tokens = int(
-            os.getenv("MAX_CONTEXT_TOKENS") or models_sec.get("max_context_tokens") or 4000
+            os.getenv("MAX_CONTEXT_TOKENS") or models_sec.get("max_context_tokens") or 8192
         )
     except (ValueError, TypeError):
-        max_context_tokens = 4000
+        max_context_tokens = 8192
 
     try:
         network_cache_seconds = int(

@@ -152,10 +152,14 @@ class OllamaProvider(LLMProvider):
                 # Nếu chỉ cài 1 model duy nhất trong Ollama, dùng luôn model đó
                 active_model = installed[0]
 
+        num_ctx_val = getattr(self._config, "max_context_tokens", 8192)
         payload: dict[str, Any] = {
             "model": active_model,
             "messages": formatted_messages,
             "stream": True,
+            "options": {
+                "num_ctx": num_ctx_val,
+            },
         }
 
         if tools:
@@ -164,10 +168,9 @@ class OllamaProvider(LLMProvider):
             payload["tools"] = to_ollama_tools(tools)
 
         url = f"{self._host}/v1/chat/completions"
-
         try:
-            # Timeout 180s để model lớn (14b/32b) có đủ thời gian load vào VRAM/RAM
-            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0, read=180.0)) as client:
+            # Timeout tối ưu 45s (thay vì 180s) tránh ứng dụng bị treo lâu
+            async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0, read=45.0)) as client:
                 async with client.stream("POST", url, json=payload) as response:
                     if response.status_code == 404:
                         installed_str = ", ".join(installed) if installed else "Chưa có model nào"

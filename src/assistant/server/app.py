@@ -8,14 +8,16 @@ Nguyên tắc an toàn & bảo mật:
 - Phục vụ giao diện tĩnh (HTML/CSS/JS) chạy hoàn toàn ngoại tuyến không cần mạng internet.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 import json
+import logging
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import sys
 from typing import Any
-
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +32,9 @@ from assistant.reminders.scheduler import ReminderScheduler
 from assistant.reminders.store import ReminderStore
 from assistant.server.schemas import (
     AutostartUpdateRequest,
+    CategoryCreateRequest,
+    CategoryItem,
+    CategoryUpdateRequest,
     ConversationCreate,
     ConversationItem,
     ConversationUpdate,
@@ -54,6 +59,8 @@ from assistant.server.schemas import (
 )
 from assistant.logging_setup import SecretFilter
 from assistant.server.ws import ChatWebSocketManager
+
+logger = logging.getLogger(__name__)
 
 def _load_or_create_session_token() -> str:
     """Nạp session token từ file dữ liệu bảo mật hoặc sinh mới nếu chưa có."""
@@ -306,6 +313,69 @@ def create_app(
             raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện để xoá.")
         return {"ok": True, "message": "Đã xoá cuộc trò chuyện thành công."}
 
+    @app.put("/api/conversations/{conv_id}", dependencies=[Depends(require_session_token)])
+    async def update_conversation_endpoint(conv_id: str, req: ConversationUpdate) -> dict[str, Any]:
+        """Cập nhật tiêu đề hoặc cờ nhạy cảm của cuộc hội thoại."""
+        ok = app_mem_store.update_conversation(conv_id, title=req.title, is_sensitive=req.is_sensitive)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Không tìm thấy cuộc trò chuyện để cập nhật.")
+        c = app_mem_store.get_conversation(conv_id)
+        return {"ok": True, "conversation": c}
+
+    @app.post("/api/conversations/{conv_id}/save-to-memory", dependencies=[Depends(require_session_token)])
+    async def save_conversation_to_memory(conv_id: str) -> dict[str, Any]:
+        """Trích xuất và lưu các dữ kiện cốt lõi từ cuộc hội thoại vào trí nhớ dài hạn."""
+        messages = app_mem_store.get_messages(conv_id, limit=60)
+        if not messages:
+            return {"ok": True, "count": 0, "items": []}
+
+        dialogue_lines: list[str] = []
+        for m in messages:
+            role = "Người dùng" if m.get("role") == "user" else "Trợ lý"
+            content = m.get("content") or ""
+            if content.strip():
+                dialogue_lines.append(f"{role}: {content.strip()}")
+
+        dialogue_text = "\n".join(dialogue_lines[-25:])
+        prompt = (
+            "Bạn là trợ lý AI chuyên trích xuất thông tin. Hãy phân tích đoạn hội thoại dưới đây và trích xuất "
+            "từ 1 đến 5 dữ kiện, quy tắc, sở thích hoặc thông tin cốt lõi quan trọng nhất của người dùng hoặc dự án "
+            "cần lưu trữ lâu dài. Trả về kết quả dưới dạng danh sách các gạch đầu dòng ngắn gọn (bắt đầu bằng '- ').\n\n"
+            f"{dialogue_text}"
+        )
+
+        extracted_items: list[str] = []
+        try:
+            from assistant.llm.base import Message
+
+            req_messages = [Message(role="user", content=prompt)]
+            summary_text = ""
+            async for event in app_router.stream_chat(req_messages, is_sensitive=False):
+                if event.type == "text_delta" and isinstance(event.content, str):
+                    summary_text += event.content
+
+            for line in summary_text.splitlines():
+                clean_line = line.strip()
+                if clean_line.startswith(("-", "*", "•")):
+                    item_text = clean_line.lstrip("-*• ").strip()
+                    if item_text and len(item_text) > 4 and "không có dữ kiện" not in item_text.lower():
+                        extracted_items.append(item_text)
+        except Exception as exc:
+            logger.warning("Lỗi trích xuất trí nhớ bằng router: %s", exc)
+
+        if not extracted_items:
+            c = app_mem_store.get_conversation(conv_id)
+            title = c.get("title") if c else "Cuộc trò chuyện"
+            if title and title != "Cuộc trò chuyện mới":
+                extracted_items.append(f"Chủ đề trao đổi trong phiên: {title}")
+
+        saved_ids: list[str] = []
+        for item in extracted_items:
+            mid = app_mem_store.add_memory(category="project", content=item, source_conv_id=conv_id)
+            saved_ids.append(mid)
+
+        return {"ok": True, "count": len(saved_ids), "items": extracted_items}
+
     # =========================================================================
     # REST API: TRÍ NHỚ DÀI HẠN (MEMORIES)
     # =========================================================================
@@ -317,8 +387,8 @@ def create_app(
     ) -> list[dict[str, Any]]:
         """Lấy danh sách hoặc tìm kiếm trí nhớ dài hạn."""
         if query and query.strip():
-            return app_mem_store.search_memories_hybrid(query.strip(), top_k=50)
-        return app_mem_store.list_memories(category=category, limit=100)
+            return await asyncio.to_thread(app_mem_store.search_memories_hybrid, query.strip(), top_k=50)
+        return await asyncio.to_thread(app_mem_store.list_memories, category=category, limit=100)
 
     @app.post("/api/memories", response_model=dict[str, Any], dependencies=[Depends(require_session_token)])
     async def add_memory(req: MemoryCreate) -> dict[str, Any]:
@@ -345,6 +415,60 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="Không tìm thấy mục trí nhớ để xoá.")
         return {"ok": True, "message": "Đã xoá mục trí nhớ thành công."}
+
+    # =========================================================================
+    # REST API: DANH MỤC TRÍ NHỚ (MEMORY CATEGORIES)
+    # =========================================================================
+
+    @app.get("/api/memories/categories", response_model=list[CategoryItem], dependencies=[Depends(require_session_token)])
+    async def list_categories_endpoint() -> list[dict[str, Any]]:
+        """Lấy toàn bộ danh mục trí nhớ."""
+        return await asyncio.to_thread(app_mem_store.list_categories)
+
+    @app.post("/api/memories/categories", response_model=dict[str, Any], dependencies=[Depends(require_session_token)])
+    async def create_category_endpoint(req: CategoryCreateRequest) -> dict[str, Any]:
+        """Tạo danh mục trí nhớ mới."""
+        try:
+            cat_id = app_mem_store.add_category(
+                name=req.name,
+                label=req.label,
+                icon=req.icon,
+                color=req.color,
+            )
+            return {"ok": True, "id": cat_id, "message": "Đã tạo danh mục thành công."}
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail=f"Mã danh mục '{req.name}' đã tồn tại.")
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+
+    @app.put("/api/memories/categories/{cat_id}", dependencies=[Depends(require_session_token)])
+    async def update_category_endpoint(cat_id: str, req: CategoryUpdateRequest) -> dict[str, Any]:
+        """Cập nhật thông tin danh mục trí nhớ."""
+        ok = app_mem_store.update_category(
+            cat_id=cat_id,
+            label=req.label,
+            icon=req.icon,
+            color=req.color,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Không tìm thấy danh mục để cập nhật.")
+        cat = app_mem_store.get_category_by_id(cat_id)
+        return {"ok": True, "category": cat}
+
+    @app.delete("/api/memories/categories/{cat_id}", dependencies=[Depends(require_session_token)])
+    async def delete_category_endpoint(cat_id: str) -> dict[str, Any]:
+        """Xoá một danh mục trí nhớ và chuyển dữ kiện về 'general'."""
+        cat = app_mem_store.get_category_by_id(cat_id)
+        if not cat:
+            raise HTTPException(status_code=404, detail="Không tìm thấy danh mục để xoá.")
+        cat_name = cat["name"]
+        if cat_name == "general":
+            raise HTTPException(status_code=400, detail="Không được phép xoá danh mục mặc định 'Chung' (general).")
+
+        ok = app_mem_store.delete_category(cat_name)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Không thể xoá danh mục.")
+        return {"ok": True, "message": f"Đã xoá danh mục '{cat['label']}' thành công."}
 
     # =========================================================================
     # REST API: LỜI NHẮC VIỆC (REMINDERS)

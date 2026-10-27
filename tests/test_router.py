@@ -198,12 +198,12 @@ async def test_auto_gemini_network_error_fallback(test_config: Config) -> None:
     async for event in router.stream_chat(messages):
         events.append(event)
 
-    # Thử lần đầu + 2 lần retry = 3 lần gọi Gemini
-    assert gemini.call_count == 3
+    # Thử lần đầu + 1 lần retry = 2 lần gọi Gemini
+    assert gemini.call_count == 2
     # Sau khi hết retry -> gọi Ollama
     assert ollama.call_count == 1
     assert router.last_provider_used == "ollama"
-    assert any("Đã chuyển sang model cục bộ" in str(e.content) for e in events if e.type == "text_delta")
+    assert any("chuyển sang mô hình cục bộ" in str(e.content).lower() or "chuyển sang model cục bộ" in str(e.content).lower() for e in events if e.type == "text_delta")
 
 
 @pytest.mark.asyncio
@@ -229,7 +229,7 @@ async def test_auto_gemini_429_fallback(test_config: Config) -> None:
     async for event in router.stream_chat(messages):
         events.append(event)
 
-    assert gemini.call_count == 3
+    assert gemini.call_count == 2
     assert ollama.call_count == 1
     assert router.last_provider_used == "ollama"
 
@@ -257,7 +257,7 @@ async def test_auto_gemini_5xx_fallback(test_config: Config) -> None:
     async for event in router.stream_chat(messages):
         events.append(event)
 
-    assert gemini.call_count == 3
+    assert gemini.call_count == 2
     assert ollama.call_count == 1
     assert router.last_provider_used == "ollama"
 
@@ -357,5 +357,5 @@ async def test_auto_gemini_404_fallback(test_config: Config) -> None:
     assert gemini.call_count == 1
     assert ollama.call_count == 1
     assert router.last_provider_used == "ollama"
-    assert any("Đã chuyển sang model cục bộ" in str(e.content) for e in events if e.type == "text_delta")
+    assert any("chuyển sang mô hình cục bộ" in str(e.content).lower() or "chuyển sang model cục bộ" in str(e.content).lower() for e in events if e.type == "text_delta")
 

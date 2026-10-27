@@ -60,7 +60,7 @@ def get_embedding_sync(
     prompt: str,
     host: str = "http://127.0.0.1:11434",
     model: str = "nomic-embed-text",
-    timeout: float = 3.0,
+    timeout: float = 1.5,
 ) -> list[float] | None:
     """Lấy vector embedding từ endpoint Ollama /api/embeddings (chế độ đồng bộ).
 
@@ -68,7 +68,7 @@ def get_embedding_sync(
         prompt: Chuỗi văn bản cần sinh embedding.
         host: Địa chỉ máy chủ Ollama (mặc định http://127.0.0.1:11434).
         model: Tên mô hình embedding (mặc định nomic-embed-text).
-        timeout: Thời gian chờ tối đa (giây).
+        timeout: Thời gian chờ tối đa (giây, mặc định 1.5s).
 
     Returns:
         Danh sách các phần tử float32 biểu diễn vector, hoặc None nếu thất bại.
@@ -110,7 +110,7 @@ async def get_embedding_async(
     prompt: str,
     host: str = "http://127.0.0.1:11434",
     model: str = "nomic-embed-text",
-    timeout: float = 3.0,
+    timeout: float = 1.5,
 ) -> list[float] | None:
     """Lấy vector embedding từ endpoint Ollama /api/embeddings (chế độ bất đồng bộ)."""
     clean_prompt = prompt.strip()

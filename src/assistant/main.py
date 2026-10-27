@@ -191,10 +191,10 @@ def run_set_key() -> int:
         return 1
 
     try:
-        import keyring
+        from assistant.llm.gemini_provider import add_gemini_api_key
 
-        keyring.set_password("TroLyAI", "GEMINI_API_KEY", key)
-        print("[THÀNH CÔNG] Đã lưu Gemini API Key an toàn vào Windows Credential Manager!")
+        add_gemini_api_key(key, name="Khóa chính CLI", set_active=True)
+        print("[THÀNH CÔNG] Đã lưu và kích hoạt Gemini API Key an toàn vào Windows Credential Manager!")
         print("  - Ứng dụng sẽ tự động sử dụng khóa này khi gọi Gemini API.")
         print("  - Bạn có thể kiểm tra trạng thái bằng lệnh: assistant doctor")
         return 0

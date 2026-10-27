@@ -41,7 +41,7 @@ class ReminderStore:
     def _get_connection(self) -> sqlite3.Connection:
         """Tạo kết nối tới SQLite và bật chế độ WAL cùng tối ưu PRAGMA cho SSD."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=15.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")

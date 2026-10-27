@@ -150,3 +150,30 @@ async def test_ollama_provider_model_cache_and_invalidation() -> None:
         assert provider.default_model == "llama3:8b"
         assert models4 == models1
 
+
+@pytest.mark.asyncio
+async def test_gemini_stream_chunk_timeout_raises_provider_error() -> None:
+    """Kiểm tra GeminiProvider.stream_chat ném lỗi ProviderError mạng khi gặp TimeoutError trên chunk."""
+    import asyncio
+    from assistant.llm.gemini_provider import GeminiProvider
+    from assistant.llm.base import Message, ProviderError
+
+    provider = GeminiProvider()
+
+    class TimeoutAsyncStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise asyncio.TimeoutError()
+
+    mock_client = MagicMock()
+    mock_client.aio.models.generate_content_stream = MagicMock(return_value=TimeoutAsyncStream())
+
+    with patch.object(provider, "_get_client", return_value=mock_client):
+        with pytest.raises(ProviderError) as exc_info:
+            async for _ in provider.stream_chat([Message(role="user", content="Test timeout")]):
+                pass
+        assert exc_info.value.kind == "network"
+
+

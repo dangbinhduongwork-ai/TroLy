@@ -7,8 +7,10 @@ Tuân thủ nghiêm ngặt:
 - Phân loại lỗi chính xác: mất mạng, hết hạn mức (429), lỗi máy chủ (5xx), lỗi xác thực, nội dung bị chặn.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 import os
+import re
 from typing import Any
 
 from assistant.config import Config, load_config
@@ -40,13 +42,47 @@ def _get_keys_backup_path() -> Path:
     return data_dir / "gemini_keys.json"
 
 
+def is_valid_gemini_key_format(key: str) -> bool:
+    """Kiểm tra định dạng khóa Google Gemini API hợp lệ (chuẩn mới AQ... hoặc truyền thống AIza...)."""
+    if not key:
+        return False
+    k = key.strip()
+    return k.startswith("AQ.") or k.startswith("AIza")
+
+
+def clean_gemini_key(raw_key: str) -> str:
+    """Làm sạch và tự động trích xuất chuỗi khóa Google Gemini API hợp lệ.
+
+    Hỗ trợ cả 2 định dạng từ Google AI Studio:
+    1. Chuẩn mới: Khóa ủy quyền bắt đầu bằng 'AQ.' (Google AI Studio Authorization Key).
+    2. Chuẩn truyền thống: Bắt đầu bằng 'AIza' (ví dụ: AIzaSy...).
+    """
+    if not raw_key:
+        return ""
+    text = raw_key.strip().strip("\"'").strip()
+
+    # 1. Trích xuất nếu dính tiền tố lệnh với định dạng mới AQ....
+    match_new = re.search(r"AQ\.[0-9A-Za-z_\-]{30,120}", text)
+    if match_new:
+        return match_new.group(0)
+
+    # 2. Trích xuất định dạng truyền thống AIza...
+    match_legacy = re.search(r"AIza[0-9A-Za-z_\-]{30,45}", text)
+    if match_legacy:
+        return match_legacy.group(0)
+
+    return text
+
+
 def mask_api_key(key: str) -> str:
     """Che giấu một phần API Key để hiển thị an toàn trên giao diện."""
     if not key:
         return ""
-    cleaned = key.strip().strip("\"'")
+    cleaned = clean_gemini_key(key)
     if len(cleaned) <= 10:
         return cleaned[:3] + "..." + cleaned[-2:]
+    if cleaned.startswith("AQ."):
+        return cleaned[:8] + "..." + cleaned[-4:]
     return cleaned[:8] + "..." + cleaned[-4:]
 
 
@@ -193,9 +229,23 @@ def add_gemini_api_key(api_key: str, name: str = "", set_active: bool = True) ->
     import uuid
     from datetime import datetime
 
-    cleaned = api_key.strip().strip("\"'")
+    raw_str = (api_key or "").strip()
+    if raw_str.startswith("...") or (len(raw_str) < 30 and "..." in raw_str):
+        raise ValueError(
+            "Khóa bạn vừa dán bị che bớt (dạng '...bM_Q'). "
+            "Trên Google AI Studio, hãy bấm vào nút 'Sao chép khóa' "
+            "để lấy trọn vẹn toàn bộ mã khóa."
+        )
+
+    cleaned = clean_gemini_key(api_key)
     if not cleaned:
         raise ValueError("Khóa API Key không được để trống")
+
+    if not is_valid_gemini_key_format(cleaned):
+        raise ValueError(
+            "Khóa Google Gemini API phải bắt đầu bằng 'AQ.' (chuẩn mới) hoặc 'AIzaSy' (truyền thống). "
+            "Vui lòng kiểm tra lại mã bạn đã sao chép từ Google AI Studio."
+        )
 
     keys = get_gemini_api_keys()
 
@@ -231,7 +281,14 @@ def update_gemini_api_key(
             if name and name.strip():
                 item["name"] = name.strip()
             if api_key and api_key.strip():
-                cleaned = api_key.strip().strip("\"'")
+                raw_u = api_key.strip()
+                if raw_u.startswith("...") or (len(raw_u) < 30 and "..." in raw_u):
+                    raise ValueError(
+                        "Khóa bạn vừa dán bị che bớt. Hãy bấm nút 'Sao chép khóa' trên Google AI Studio để lấy toàn bộ mã."
+                    )
+                cleaned = clean_gemini_key(api_key)
+                if cleaned and not is_valid_gemini_key_format(cleaned):
+                    raise ValueError("Khóa Google Gemini API phải bắt đầu bằng 'AQ.' hoặc 'AIzaSy'.")
                 if cleaned and "..." not in cleaned:
                     item["key"] = cleaned
                     # Tự động kích hoạt khóa khi vừa cập nhật giá trị bí mật mới
@@ -276,21 +333,57 @@ def set_active_gemini_api_key(key_id: str) -> bool:
 
 def test_gemini_api_key_connectivity(api_key: str) -> tuple[bool, str]:
     """Kiểm tra xem khóa Gemini API có hoạt động và kết nối được với Google hay không."""
-    cleaned = api_key.strip().strip("\"'")
+    if not api_key or not api_key.strip():
+        return False, "Khóa API Key không được để trống"
+
+    raw_str = api_key.strip()
+    if raw_str.startswith("...") or (len(raw_str) < 30 and "..." in raw_str):
+        return False, (
+            "Khóa bạn vừa dán bị che bớt (chỉ có dạng '...bM_Q'). "
+            "Trên Google AI Studio, bạn hãy bấm vào nút 'Sao chép khóa' "
+            "để copy toàn bộ chuỗi khóa bắt đầu bằng 'AQ.' hoặc 'AIzaSy'."
+        )
+
+    cleaned = clean_gemini_key(api_key)
     if not cleaned:
         return False, "Khóa API Key không được để trống"
+
+    if cleaned.startswith("sk-") or cleaned.startswith("gsk_"):
+        return False, (
+            "Khóa bạn vừa dán là của OpenAI hoặc Groq, không phải Google Gemini API. "
+            "Khóa Gemini từ Google AI Studio bắt đầu bằng 'AQ.' hoặc 'AIzaSy...'. "
+            "Vui lòng tạo khóa tại https://aistudio.google.com/app/apikey"
+        )
+
+    if not is_valid_gemini_key_format(cleaned):
+        return False, (
+            f"Khóa bạn vừa dán không đúng định dạng của Google Gemini API (phải bắt đầu bằng 'AQ.' hoặc 'AIzaSy', hiện tại: '{cleaned[:10]}...'). "
+            "Trên Google AI Studio, vui lòng bấm vào nút 'Sao chép khóa' để copy trọn vẹn mã khóa."
+        )
 
     try:
         from google import genai
 
         client = genai.Client(api_key=cleaned)
-        # Thử gọi generate_content ngắn để kiểm tra chính xác tính khả dụng của chat
-        try:
-            client.models.generate_content(model="gemini-2.0-flash", contents="1")
-        except Exception:
-            # Dự phòng thử gemini-1.5-flash nếu gemini-2.0-flash chưa sẵn sàng
-            client.models.generate_content(model="gemini-1.5-flash", contents="1")
-        return True, "Khóa Gemini API hoạt động rất tốt! Kết nối Google Gemini thành công."
+        # 1. Thử sinh nội dung chat thực tế ưu tiên gemini-1.5-flash -> gemini-2.0-flash
+        last_gen_err: Exception | None = None
+        for test_model in ["gemini-1.5-flash", "gemini-2.0-flash"]:
+            try:
+                client.models.generate_content(model=test_model, contents="1")
+                return True, "Khóa Gemini API hoạt động rất tốt! Kết nối và sinh văn bản thành công."
+            except Exception as gen_err:
+                last_gen_err = gen_err
+
+        # 2. Nếu sinh nội dung chưa kịp kích hoạt hạn mức, thử kiểm tra metadata mô hình
+        for test_model in ["gemini-1.5-flash", "gemini-2.0-flash"]:
+            try:
+                client.models.get(model=test_model)
+                return True, "Khóa Gemini API hợp lệ và đã kết nối thành công với Google!"
+            except Exception:
+                pass
+
+        if last_gen_err:
+            raise last_gen_err
     except Exception as err:
         p_err = classify_gemini_error(err)
         return False, p_err.message
@@ -302,9 +395,13 @@ def get_gemini_api_key() -> str | None:
         keys = get_gemini_api_keys()
         for k in keys:
             if k.get("is_active") and k.get("key"):
-                return k["key"].strip().strip("\"'")
+                cleaned = clean_gemini_key(k["key"])
+                if cleaned:
+                    return cleaned
         if keys and keys[0].get("key"):
-            return keys[0]["key"].strip().strip("\"'")
+            cleaned = clean_gemini_key(keys[0]["key"])
+            if cleaned:
+                return cleaned
     except Exception:
         pass
 
@@ -313,7 +410,7 @@ def get_gemini_api_key() -> str | None:
 
         key = keyring.get_password("TroLyAI", "GEMINI_API_KEY")
         if key and key.strip():
-            cleaned = key.strip().strip("\"'")
+            cleaned = clean_gemini_key(key)
             if cleaned:
                 return cleaned
     except Exception:
@@ -321,7 +418,7 @@ def get_gemini_api_key() -> str | None:
 
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key and env_key.strip():
-        cleaned = env_key.strip().strip("\"'")
+        cleaned = clean_gemini_key(env_key)
         if cleaned:
             return cleaned
 
@@ -471,13 +568,13 @@ class GeminiProvider(LLMProvider):
     async def list_models(self) -> list[str]:
         """Liệt kê các model Gemini khả dụng cho API key hiện tại."""
         client = self._get_client()
-        default_list = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+        default_list = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
         try:
             models_pager = await client.aio.models.list()
             model_names: list[str] = []
             async for m in models_pager:
                 name = getattr(m, "name", str(m))
-                # Tinh gọn tên model (ví dụ: models/gemini-2.5-flash -> gemini-2.5-flash)
+                # Tinh gọn tên model (ví dụ: models/gemini-1.5-flash -> gemini-1.5-flash)
                 if name.startswith("models/"):
                     name = name.removeprefix("models/")
                 if "gemini" in name.lower() and "embed" not in name.lower():
@@ -549,128 +646,139 @@ class GeminiProvider(LLMProvider):
 
             generate_config.tools = to_gemini_tools(tools)
 
-        # 3. Thực hiện gọi streaming bất đồng bộ kèm cơ chế tự phục hồi danh sách mô hình & endpoint
-        candidate_models = [
-            self._model_name,
-            "gemini-1.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-pro",
-        ]
-        seen: set[str] = set()
-        candidates: list[str] = [m for m in candidate_models if not (m in seen or seen.add(m))]
-
-        # Chuẩn bị danh sách client: ưu tiên client mặc định v1beta (hỗ trợ đầy đủ gemini-2.0-flash), sau đó mới tới v1 dự phòng
-        clients_to_try: list[Any] = [client]
-        try:
-            clients_to_try.append(self._get_client(api_version="v1"))
-        except Exception:
-            pass
+        # 3. Thực hiện gọi streaming bất đồng bộ kèm timeout 8s và fallback chuẩn Google
+        candidates = [self._model_name]
+        for fallback in ["gemini-1.5-flash", "gemini-2.0-flash"]:
+            if fallback not in candidates:
+                candidates.append(fallback)
 
         last_err: Exception | None = None
-        for cl_idx, cl in enumerate(clients_to_try):
-            for idx, current_cand in enumerate(candidates):
-                yielded_any = False
-                try:
-                    stream = await cl.aio.models.generate_content_stream(
+        for idx, current_cand in enumerate(candidates):
+            yielded_any = False
+            try:
+                stream = await asyncio.wait_for(
+                    client.aio.models.generate_content_stream(
                         model=current_cand,
                         contents=contents,
                         config=generate_config,
-                    )
+                    ),
+                    timeout=8.0,
+                )
 
-                    async for chunk in stream:
-                        yielded_any = True
-                        # Trích xuất văn bản từ chunk nếu có
-                        if chunk.text:
-                            yield StreamEvent(type="text_delta", content=chunk.text)
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(stream.__anext__(), timeout=10.0)
+                    except StopAsyncIteration:
+                        break
 
-                        # Trích xuất Function Calls từ chunk nếu có
-                        function_calls = getattr(chunk, "function_calls", None)
-                        if function_calls:
-                            from assistant.llm.base import ToolCall
+                    yielded_any = True
+                    # Trích xuất văn bản từ chunk nếu có
+                    if chunk.text:
+                        yield StreamEvent(type="text_delta", content=chunk.text)
 
-                            for fc in function_calls:
-                                call_id = getattr(fc, "id", None) or getattr(fc, "name", "call")
-                                args = getattr(fc, "args", {}) or {}
-                                yield StreamEvent(
-                                    type="tool_call",
-                                    content=ToolCall(
-                                        id=str(call_id),
-                                        name=getattr(fc, "name", "unknown"),
-                                        arguments=dict(args),
-                                    ),
-                                )
+                    # Trích xuất Function Calls từ chunk nếu có
+                    function_calls = getattr(chunk, "function_calls", None)
+                    if function_calls:
+                        from assistant.llm.base import ToolCall
 
-                        # Trích xuất usage nếu có trong metadata
-                        usage_meta = getattr(chunk, "usage_metadata", None)
-                        if usage_meta:
-                            prompt_tok = getattr(usage_meta, "prompt_token_count", 0) or 0
-                            cand_tok = getattr(usage_meta, "candidates_token_count", 0) or 0
-                            total_tok = getattr(usage_meta, "total_token_count", 0) or (prompt_tok + cand_tok)
+                        for fc in function_calls:
+                            call_id = getattr(fc, "id", None) or getattr(fc, "name", "call")
+                            args = getattr(fc, "args", {}) or {}
                             yield StreamEvent(
-                                type="usage",
-                                content=Usage(
-                                    prompt_tokens=prompt_tok,
-                                    completion_tokens=cand_tok,
-                                    total_tokens=total_tok,
+                                type="tool_call",
+                                content=ToolCall(
+                                    id=str(call_id),
+                                    name=getattr(fc, "name", "unknown"),
+                                    arguments=dict(args),
                                 ),
                             )
 
-                    # Cập nhật mô hình hoạt động thành công
-                    self._model_name = current_cand
-                    yield StreamEvent(type="done", content={"finish_reason": "stop"})
-                    return
+                    # Trích xuất usage nếu có trong metadata
+                    usage_meta = getattr(chunk, "usage_metadata", None)
+                    if usage_meta:
+                        prompt_tok = getattr(usage_meta, "prompt_token_count", 0) or 0
+                        cand_tok = getattr(usage_meta, "candidates_token_count", 0) or 0
+                        total_tok = getattr(usage_meta, "total_token_count", 0) or (prompt_tok + cand_tok)
+                        yield StreamEvent(
+                            type="usage",
+                            content=Usage(
+                                prompt_tokens=prompt_tok,
+                                completion_tokens=cand_tok,
+                                total_tokens=total_tok,
+                            ),
+                        )
 
-                except Exception as err:
-                    last_err = err
-                    err_str = str(err).lower()
-                    is_last = (cl_idx == len(clients_to_try) - 1 and idx == len(candidates) - 1)
+                # Cập nhật mô hình hoạt động thành công
+                self._model_name = current_cand
+                yield StreamEvent(type="done", content={"finish_reason": "stop"})
+                return
 
-                    # 1. Nếu có đính kèm công cụ và thất bại trước khi sinh chữ nào (do quyền hạn công cụ hoặc schema),
-                    # tự động thử lại model này ở chế độ thuần văn bản để người dùng vẫn chat được bình thường
-                    if getattr(generate_config, "tools", None) and not yielded_any:
-                        try:
-                            config_no_tools = types.GenerateContentConfig()
-                            if system:
-                                config_no_tools.system_instruction = system
-                            fallback_stream = await cl.aio.models.generate_content_stream(
+            except Exception as err:
+                last_err = err
+                err_str = str(err).lower()
+                is_timeout = isinstance(err, (asyncio.TimeoutError, TimeoutError)) or "timeout" in err_str
+                is_last = (idx == len(candidates) - 1)
+
+                # 1. Nếu có đính kèm công cụ và thất bại trước khi sinh chữ nào (do quyền hạn công cụ hoặc schema),
+                # và KHÔNG PHẢI lỗi timeout mạng: tự động thử lại model này ở chế độ thuần văn bản
+                if not is_timeout and getattr(generate_config, "tools", None) and not yielded_any:
+                    try:
+                        config_no_tools = types.GenerateContentConfig()
+                        if system:
+                            config_no_tools.system_instruction = system
+                        fallback_stream = await asyncio.wait_for(
+                            client.aio.models.generate_content_stream(
                                 model=current_cand,
                                 contents=contents,
                                 config=config_no_tools,
-                            )
-                            async for chunk in fallback_stream:
-                                yielded_any = True
-                                if chunk.text:
-                                    yield StreamEvent(type="text_delta", content=chunk.text)
-                                usage_meta = getattr(chunk, "usage_metadata", None)
-                                if usage_meta:
-                                    prompt_tok = getattr(usage_meta, "prompt_token_count", 0) or 0
-                                    cand_tok = getattr(usage_meta, "candidates_token_count", 0) or 0
-                                    total_tok = getattr(usage_meta, "total_token_count", 0) or (prompt_tok + cand_tok)
-                                    yield StreamEvent(
-                                        type="usage",
-                                        content=Usage(
-                                            prompt_tokens=prompt_tok,
-                                            completion_tokens=cand_tok,
-                                            total_tokens=total_tok,
-                                        ),
-                                    )
-                            if yielded_any:
-                                self._model_name = current_cand
-                                yield StreamEvent(type="done", content={"finish_reason": "stop"})
-                                return
-                        except Exception:
-                            pass
+                            ),
+                            timeout=8.0,
+                        )
+                        while True:
+                            try:
+                                chunk = await asyncio.wait_for(fallback_stream.__anext__(), timeout=10.0)
+                            except StopAsyncIteration:
+                                break
+                            yielded_any = True
+                            if chunk.text:
+                                yield StreamEvent(type="text_delta", content=chunk.text)
+                            usage_meta = getattr(chunk, "usage_metadata", None)
+                            if usage_meta:
+                                prompt_tok = getattr(usage_meta, "prompt_token_count", 0) or 0
+                                cand_tok = getattr(usage_meta, "candidates_token_count", 0) or 0
+                                total_tok = getattr(usage_meta, "total_token_count", 0) or (prompt_tok + cand_tok)
+                                yield StreamEvent(
+                                    type="usage",
+                                    content=Usage(
+                                        prompt_tokens=prompt_tok,
+                                        completion_tokens=cand_tok,
+                                        total_tokens=total_tok,
+                                    ),
+                                )
+                        if yielded_any:
+                            self._model_name = current_cand
+                            yield StreamEvent(type="done", content={"finish_reason": "stop"})
+                            return
+                    except Exception:
+                        pass
 
-                    # 2. Nếu là lỗi xác thực (sai key hoàn toàn), dừng ngay và báo lỗi rõ ràng
-                    is_auth = any(k in err_str for k in ["401", "403", "api_key_invalid", "permission_denied", "unauthenticated", "unauthorized"])
-                    if is_auth:
-                        raise classify_gemini_error(err) from err
-
-                    # 3. Nếu chưa yield dữ liệu nào và chưa phải lượt thử cuối, tiếp tục thử candidate model tiếp theo
-                    if not yielded_any and not is_last:
-                        continue
-
+                # 2. Nếu là lỗi xác thực (sai key hoàn toàn), dừng ngay và báo lỗi rõ ràng
+                is_auth = any(k in err_str for k in ["401", "403", "api_key_invalid", "permission_denied", "unauthenticated", "unauthorized"])
+                if is_auth:
                     raise classify_gemini_error(err) from err
+
+                # 3. Nếu chưa yield dữ liệu nào và chưa phải lượt thử cuối, tiếp tục thử fallback
+                if not yielded_any and not is_last:
+                    next_cand = candidates[idx + 1]
+                    logger.info(
+                        "Mô hình '%s' gặp sự cố (%s), tự động chuyển sang mô hình dự phòng '%s'...",
+                        current_cand,
+                        err,
+                        next_cand,
+                    )
+                    continue
+
+                raise classify_gemini_error(err) from err
 
         if last_err:
             raise classify_gemini_error(last_err)

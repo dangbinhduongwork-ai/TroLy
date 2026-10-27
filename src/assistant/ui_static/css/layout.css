@@ -11,9 +11,33 @@
     overflow: hidden;
 }
 
+/* BIỂU TƯỢNG ĐỒNG NHẤT (MINIMALIST SVG ICONS) */
+.icon-svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2;
+    stroke: currentColor;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: middle;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.icon-svg.icon-sm {
+    width: 14px;
+    height: 14px;
+}
+
+.icon-svg.icon-lg {
+    width: 22px;
+    height: 22px;
+}
+
 /* THANH ĐIỀU HƯỚNG BÊN TRÁI (SIDEBAR) */
 .sidebar {
-    width: 250px;
+    width: 240px;
     min-width: 200px;
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
@@ -24,7 +48,7 @@
 }
 
 .sidebar-header {
-    padding: 1.25rem 1rem 1rem 1rem;
+    padding: 1.25rem 1.15rem 1rem 1.15rem;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -35,7 +59,31 @@
 }
 
 .brand-icon {
-    font-size: 1.5rem;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    color: var(--accent);
+}
+
+.brand-icon .avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.brand-text h1 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+    line-height: 1.2;
 }
 
 .brand-title {
@@ -53,9 +101,18 @@
     color: var(--text-muted);
 }
 
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+}
+
 .status-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background-color: var(--warning);
     transition: var(--transition);
@@ -63,24 +120,19 @@
 
 .status-dot.online {
     background-color: var(--success);
-    box-shadow: 0 0 8px var(--success);
+    box-shadow: 0 0 6px var(--success);
 }
 
-.status-dot.local {
-    background-color: #8b5cf6;
-    box-shadow: 0 0 8px #8b5cf6;
-}
-
-.status-dot.error {
+.status-dot.offline {
     background-color: var(--danger);
 }
 
-.sidebar-nav {
+.nav-menu, .sidebar-nav {
     flex: 1;
-    padding: 1rem 0.5rem;
+    padding: 0.85rem 0.65rem;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.3rem;
     overflow-y: auto;
 }
 
@@ -88,16 +140,18 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.65rem 0.85rem;
-    border-radius: var(--radius-sm);
-    border: none;
+    padding: 0.6rem 0.85rem;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
     text-align: left;
     transition: var(--transition);
+    user-select: none;
+    width: 100%;
 }
 
 .nav-item:hover {
@@ -109,31 +163,39 @@
     background-color: var(--accent);
     color: #ffffff;
     font-weight: 600;
+    box-shadow: 0 4px 12px var(--accent-glow);
 }
 
 .nav-icon {
-    font-size: 1.15rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
 }
 
 .sidebar-footer {
-    padding: 0.75rem 1rem;
+    padding: 0.85rem 1rem;
     border-top: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
+    background: var(--bg-secondary);
 }
 
 .workspace-info {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
     font-size: 0.78rem;
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: default;
+    flex: 1;
 }
 
 .ws-path {
@@ -143,20 +205,23 @@
 }
 
 .theme-toggle {
-    background: transparent;
+    background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    padding: 0.35rem 0.5rem;
+    width: 32px;
+    height: 32px;
     cursor: pointer;
-    font-size: 1rem;
     transition: var(--transition);
     display: flex;
     align-items: center;
     justify-content: center;
+    color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
 .theme-toggle:hover {
-    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--accent);
 }
 
 /* KHUNG NỘI DUNG CHÍNH (MAIN CONTENT) */
@@ -185,7 +250,7 @@
 }
 
 .screen-header {
-    padding: 1rem 1.5rem;
+    padding: 1rem 1.75rem;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -195,18 +260,19 @@
 }
 
 .screen-title-area h2 {
-    font-size: 1.25rem;
+    font-size: 1.2rem;
     font-weight: 700;
+    margin: 0;
 }
 
 .screen-title-area p {
     font-size: 0.85rem;
-    margin-bottom: 0;
+    margin: 0.2rem 0 0 0;
 }
 
-/* KHUNG CHAT RIÊNG BIỆT */
+/* KHUNG CHAT HIỆN ĐẠI */
 .chat-header {
-    padding: 0.75rem 1.25rem;
+    padding: 0.75rem 1.75rem;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -227,38 +293,35 @@
 .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 1.5rem;
+    padding: 1.5rem 2rem;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 1.35rem;
     scroll-behavior: smooth;
 }
 
-/* KHUNG NHẬP LIỆU DÍNH ĐÁY (STICKY INPUT DOCK) */
-.chat-input-area {
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border-color);
-    background-color: var(--bg-secondary);
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+/* KHUNG NHẬP LIỆU HIỆN ĐẠI (FLOATING CHAT INPUT DOCK) */
+.chat-input-bar {
+    padding: 0.75rem 2rem 1.25rem 2rem;
+    background: transparent;
     flex-shrink: 0;
 }
 
-.input-wrapper {
+.input-container {
     display: flex;
     align-items: flex-end;
-    gap: 0.5rem;
-    background-color: var(--bg-primary);
+    gap: 0.65rem;
+    background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-lg);
+    padding: 0.65rem 0.85rem;
+    box-shadow: var(--shadow-md);
     transition: var(--transition);
 }
 
-.input-wrapper:focus-within {
+.input-container:focus-within {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-glow);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .chat-textarea {
@@ -272,6 +335,13 @@
     max-height: 180px;
     outline: none;
     line-height: 1.5;
+    padding: 0.2rem 0.25rem;
+}
+
+.input-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 
 /* THÍCH ỨNG RESPONSIVE CHO CỬA SỔ NHỎ (900x600) VÀ LỚN */
