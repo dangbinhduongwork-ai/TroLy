@@ -7,8 +7,13 @@
 // CẤU HÌNH & QUẢN LÝ PHIÊN LÀM VIỆC (SESSION & STATE)
 // =============================================================================
 
+const urlParamToken = new URLSearchParams(window.location.search).get("token");
+if (urlParamToken) {
+    localStorage.setItem("troly_session_token", urlParamToken);
+}
+
 const state = {
-    token: new URLSearchParams(window.location.search).get("token") || localStorage.getItem("troly_session_token") || "",
+    token: urlParamToken || localStorage.getItem("troly_session_token") || "",
     currentConversationId: null,
     currentScreen: "chat",
     ws: null,
@@ -18,10 +23,6 @@ const state = {
     approvalTimerInterval: null,
     activeApprovalRequestId: null,
 };
-
-if (state.token) {
-    localStorage.setItem("troly_session_token", state.token);
-}
 
 // =============================================================================
 // BỘ PHÂN TÍCH MARKDOWN THUẦN TÚY (OFFLINE SAFE MARKDOWN PARSER)
@@ -188,13 +189,22 @@ function connectWebSocket() {
 
     state.ws.onclose = (event) => {
         statusDot.className = "status-dot offline";
-        if (event.code === 1008 || (event.reason && event.reason.includes("token"))) {
+        const isAuthError = (
+            event.code === 1008 ||
+            event.code === 4003 ||
+            (event.reason && (event.reason.toLowerCase().includes("token") || event.reason.toLowerCase().includes("forbidden")))
+        );
+
+        if (isAuthError) {
+            console.warn("WebSocket bị từ chối kết nối do phiên làm việc hết hạn hoặc token không hợp lệ (mã: " + event.code + ")");
             statusText.innerText = "Phiên làm việc đã hết hạn. Vui lòng F5 tải lại trang.";
+            // Ngừng kết nối lại vô hạn để không làm ngập log máy chủ
             return;
         }
+
         statusText.innerText = "Mất kết nối (Đang thử lại...)";
-        // Tự động kết nối lại sau 2 giây
-        setTimeout(connectWebSocket, 2000);
+        // Tự động kết nối lại sau 3 giây đối với các lỗi mạng tạm thời
+        setTimeout(connectWebSocket, 3000);
     };
 
     state.ws.onerror = (err) => {
@@ -821,6 +831,34 @@ async function loadDiagnostics() {
             };
         }
 
+        // Cập nhật Gemini model dropdown
+        const activeGemini = res.gemini_model || "gemini-2.0-flash";
+        const geminiModelSelect = document.getElementById("settings-select-gemini-model");
+        if (geminiModelSelect) {
+            geminiModelSelect.innerHTML = "";
+            const geminiCandidates = (res.gemini_models && res.gemini_models.length > 0)
+                ? res.gemini_models
+                : ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+
+            if (!geminiCandidates.includes(activeGemini)) {
+                geminiCandidates.unshift(activeGemini);
+            }
+
+            geminiCandidates.forEach((m) => {
+                const opt = document.createElement("option");
+                opt.value = m;
+                opt.innerText = m + (m === "gemini-2.0-flash" ? " (Khuyên dùng)" : "");
+                if (m === activeGemini) {
+                    opt.selected = true;
+                }
+                geminiModelSelect.appendChild(opt);
+            });
+
+            geminiModelSelect.onchange = async (e) => {
+                await changeGeminiModel(e.target.value);
+            };
+        }
+
         // Cập nhật tên local model trên badge và dropdown
         const activeLocal = res.local_model || "qwen2.5:14b";
         const headerBadge = document.getElementById("active-local-model-badge");
@@ -892,8 +930,27 @@ async function loadDiagnostics() {
                 modelsList.innerHTML = `<span class="tag-empty">${res.ollama_running ? "(Chưa có model nào. Hãy chạy: ollama pull qwen2.5:14b)" : "(Ollama chưa bật)"}</span>`;
             }
         }
+
+        // Tự động nạp danh sách Gemini API Keys đã lưu
+        await loadGeminiKeys();
     } catch (err) {
         console.error("Lỗi tải chẩn đoán:", err);
+    }
+}
+
+async function changeGeminiModel(newModel) {
+    if (!newModel) return;
+    try {
+        const res = await apiFetch("/api/settings/gemini-model", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gemini_model: newModel }),
+        });
+        if (res && res.ok) {
+            await loadDiagnostics();
+        }
+    } catch (err) {
+        console.error("Lỗi cập nhật model Gemini:", err);
     }
 }
 
@@ -915,36 +972,362 @@ async function changeLocalModel(newModel) {
     }
 }
 
-async function saveGeminiKey() {
-    const keyInput = document.getElementById("input-gemini-key");
-    const feedback = document.getElementById("key-feedback");
-    const keyVal = keyInput.value.trim();
+// =============================================================================
+// QUẢN LÝ GEMINI API KEYS (DYNAMIC ROWS, CRUD & TEST CONNECTIVITY)
+// =============================================================================
 
-    if (!keyVal) {
-        feedback.innerText = "⚠️ Vui lòng nhập API Key hợp lệ trước khi bấm lưu.";
-        feedback.className = "key-status-feedback error";
-        return;
-    }
+let _geminiKeysCache = [];
+
+async function loadGeminiKeys() {
+    const container = document.getElementById("key-rows-container");
+    const countBadge = document.getElementById("keys-count-badge");
+    if (!container) return;
 
     try {
-        const res = await apiFetch("/api/settings/gemini-key", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ api_key: keyVal }),
-        });
-        if (res && res.ok) {
-            feedback.innerText = "✅ " + res.message;
-            feedback.className = "key-status-feedback success";
-            keyInput.value = "";
-            loadDiagnostics();
-        } else {
-            feedback.innerText = "❌ Lỗi: " + (res?.detail || "Không thể lưu khóa.");
-            feedback.className = "key-status-feedback error";
+        const res = await apiFetch("/api/settings/gemini-keys");
+        const keys = (res && Array.isArray(res.keys)) ? res.keys : [];
+        _geminiKeysCache = keys;
+
+        if (countBadge) {
+            countBadge.innerText = `${keys.length} khóa`;
         }
+
+        container.innerHTML = "";
+
+        if (keys.length === 0) {
+            container.innerHTML = `
+                <div class="keys-empty-box">
+                    <div class="keys-empty-icon">🔑</div>
+                    <div class="keys-empty-title">Chưa có khóa Gemini API nào được lưu</div>
+                    <div class="keys-empty-desc">
+                        Hỗ trợ lưu nhiều API Key dự phòng trong Windows Credential Locker. Bấm nút bên dưới để thêm ô nhập khóa đầu tiên!
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-empty-add-key">
+                        ➕ Thêm Khóa Đầu Tiên
+                    </button>
+                </div>
+            `;
+            const emptyAddBtn = document.getElementById("btn-empty-add-key");
+            if (emptyAddBtn) emptyAddBtn.onclick = addNewKeyRow;
+            return;
+        }
+
+        keys.forEach((item) => {
+            const rowEl = createKeyRowElement(item, false);
+            container.appendChild(rowEl);
+        });
     } catch (err) {
-        feedback.innerText = "❌ Lỗi: " + err.message;
-        feedback.className = "key-status-feedback error";
+        console.error("Lỗi tải danh sách Gemini keys:", err);
+        container.innerHTML = `<div class="key-test-feedback-box error">Lỗi tải danh sách khóa: ${escapeHtml(err.message)}</div>`;
     }
+}
+
+function addNewKeyRow() {
+    const container = document.getElementById("key-rows-container");
+    if (!container) return;
+
+    // Xóa hộp trống nếu có
+    const emptyBox = container.querySelector(".keys-empty-box");
+    if (emptyBox) {
+        emptyBox.remove();
+    }
+
+    const nextIndex = container.querySelectorAll(".key-row-card").length + 1;
+    const dummyItem = {
+        id: "",
+        name: `Khóa ${nextIndex}`,
+        masked_key: "",
+        is_active: false,
+    };
+
+    const newRowEl = createKeyRowElement(dummyItem, true);
+    container.appendChild(newRowEl);
+
+    // Tự động cuộn đến và focus vào ô nhập khóa
+    newRowEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const secretInput = newRowEl.querySelector(".input-key-secret");
+    if (secretInput) {
+        secretInput.focus();
+    }
+}
+
+function createKeyRowElement(item, isNew = false) {
+    const card = document.createElement("div");
+    card.className = "key-row-card" + (item.is_active ? " active-key" : "") + (isNew ? " new-row" : "");
+    if (item.id) card.dataset.keyId = item.id;
+
+    const statusBadgeHtml = isNew
+        ? `<span class="key-status-badge new">🆕 Mới (Chưa lưu)</span>`
+        : (item.is_active
+            ? `<span class="key-status-badge active">● Đang sử dụng</span>`
+            : `<span class="key-status-badge standby">● Dự phòng</span>`);
+
+    const iconHtml = isNew ? "✨" : (item.is_active ? "🟢" : "🔵");
+
+    card.innerHTML = `
+        <div class="key-row-header">
+            <div class="key-row-name-group">
+                <span class="key-name-icon">${iconHtml}</span>
+                <input 
+                    type="text" 
+                    class="input-key-name" 
+                    value="${escapeHtml(item.name || '')}" 
+                    placeholder="Tên gợi nhớ (VD: Khóa 1, Dự phòng...)"
+                    title="Tên gợi nhớ của khóa"
+                >
+            </div>
+            <div class="key-row-status">
+                ${statusBadgeHtml}
+            </div>
+        </div>
+
+        <div class="key-input-group">
+            <div class="key-input-wrapper">
+                <input 
+                    type="password" 
+                    class="input-key-secret" 
+                    value="${isNew ? '' : escapeHtml(item.masked_key || '')}" 
+                    data-masked="${isNew ? '' : escapeHtml(item.masked_key || '')}" 
+                    placeholder="${isNew ? 'Dán Gemini API Key vào đây (AIzaSy...)' : 'Dán API key mới nếu muốn đổi...'}" 
+                    autocomplete="off"
+                    spellcheck="false"
+                >
+                <button type="button" class="btn-toggle-eye" title="Hiện / Ẩn khóa">👁️</button>
+            </div>
+            <button type="button" class="btn-test-key" title="Kiểm tra kết nối khóa này với Google Gemini">
+                <span>🔍</span> Kiểm Tra
+            </button>
+        </div>
+
+        <div class="key-row-bottom">
+            <div class="key-actions-left">
+                <button type="button" class="btn-save-key-row">
+                    💾 ${isNew ? 'Lưu Khóa' : 'Lưu Thay Đổi'}
+                </button>
+                ${!isNew && !item.is_active ? '<button type="button" class="btn-activate-key-row" title="Đặt khóa này làm khóa hoạt động chính">⚡ Sử Dụng</button>' : ''}
+                ${isNew ? '<button type="button" class="btn-cancel-key-row">❌ Hủy Bỏ</button>' : ''}
+            </div>
+            <div class="key-actions-right">
+                ${!isNew ? '<button type="button" class="btn-delete-key-row" title="Xóa khóa này khỏi Windows">🗑️ Xóa</button>' : ''}
+            </div>
+        </div>
+
+        <div class="key-test-feedback-box hidden"></div>
+    `;
+
+    // 1. Logic ẩn/hiện mật khẩu
+    const secretInput = card.querySelector(".input-key-secret");
+    const eyeBtn = card.querySelector(".btn-toggle-eye");
+    eyeBtn.onclick = () => {
+        if (secretInput.type === "password") {
+            secretInput.type = "text";
+            eyeBtn.innerText = "🔒";
+            eyeBtn.title = "Ẩn khóa bí mật";
+        } else {
+            secretInput.type = "password";
+            eyeBtn.innerText = "👁️";
+            eyeBtn.title = "Hiện khóa bí mật";
+        }
+    };
+
+    // 2. Logic nút kiểm tra khóa
+    const testBtn = card.querySelector(".btn-test-key");
+    const feedbackBox = card.querySelector(".key-test-feedback-box");
+
+    testBtn.onclick = async () => {
+        const rawVal = secretInput.value.trim();
+        const maskedVal = secretInput.dataset.masked || "";
+
+        let testPayload = {};
+        if (isNew) {
+            if (!rawVal) {
+                feedbackBox.className = "key-test-feedback-box error";
+                feedbackBox.innerText = "⚠️ Vui lòng dán Gemini API Key vào ô trước khi bấm Kiểm tra.";
+                return;
+            }
+            testPayload = { api_key: rawVal };
+        } else {
+            if (rawVal && rawVal !== maskedVal) {
+                testPayload = { api_key: rawVal };
+            } else {
+                testPayload = { key_id: item.id };
+            }
+        }
+
+        const origBtnText = testBtn.innerHTML;
+        testBtn.disabled = true;
+        testBtn.innerHTML = `<span>⏳</span> Đang thử...`;
+        feedbackBox.className = "key-test-feedback-box loading";
+        feedbackBox.innerText = "Đang kết nối và xác thực với Google Gemini...";
+
+        try {
+            const res = await apiFetch("/api/settings/gemini-keys/test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(testPayload),
+            });
+
+            if (res && res.ok) {
+                feedbackBox.className = "key-test-feedback-box success";
+                feedbackBox.innerText = "✅ " + res.message;
+            } else {
+                feedbackBox.className = "key-test-feedback-box error";
+                feedbackBox.innerText = "❌ " + (res?.message || res?.detail || "Khóa không hợp lệ hoặc lỗi mạng.");
+            }
+        } catch (err) {
+            feedbackBox.className = "key-test-feedback-box error";
+            feedbackBox.innerText = "❌ Lỗi: " + err.message;
+        } finally {
+            testBtn.disabled = false;
+            testBtn.innerHTML = origBtnText;
+        }
+    };
+
+    // 3. Logic nút Lưu (Lưu khóa mới hoặc cập nhật khóa đã lưu)
+    const saveBtn = card.querySelector(".btn-save-key-row");
+    const nameInput = card.querySelector(".input-key-name");
+
+    saveBtn.onclick = async () => {
+        const nameVal = nameInput.value.trim();
+        const secretVal = secretInput.value.trim();
+        const maskedVal = secretInput.dataset.masked || "";
+
+        if (isNew) {
+            if (!secretVal) {
+                feedbackBox.className = "key-test-feedback-box error";
+                feedbackBox.innerText = "⚠️ Vui lòng dán khóa API vào ô trước khi lưu.";
+                return;
+            }
+
+            const origSaveText = saveBtn.innerHTML;
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = `⏳ Đang lưu...`;
+
+            try {
+                const res = await apiFetch("/api/settings/gemini-keys", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ api_key: secretVal, name: nameVal }),
+                });
+
+                if (res && res.ok) {
+                    showToast(res.message || "Đã lưu khóa thành công!", "success");
+                    await loadGeminiKeys();
+                    await loadDiagnostics();
+                } else {
+                    feedbackBox.className = "key-test-feedback-box error";
+                    feedbackBox.innerText = "❌ " + (res?.detail || "Không thể lưu khóa.");
+                }
+            } catch (err) {
+                feedbackBox.className = "key-test-feedback-box error";
+                feedbackBox.innerText = "❌ Lỗi: " + err.message;
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = origSaveText;
+            }
+        } else {
+            const hasNewSecret = secretVal && secretVal !== maskedVal && !secretVal.includes("...");
+            const hasNewName = nameVal && nameVal !== item.name;
+
+            if (!hasNewSecret && !hasNewName) {
+                showToast("ℹ️ Không có thay đổi nào cần lưu.", "info");
+                return;
+            }
+
+            const origSaveText = saveBtn.innerHTML;
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = `⏳ Đang cập nhật...`;
+
+            try {
+                const updatePayload = {
+                    name: nameVal || item.name,
+                };
+                if (hasNewSecret) {
+                    updatePayload.api_key = secretVal;
+                }
+
+                const res = await apiFetch(`/api/settings/gemini-keys/${encodeURIComponent(item.id)}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(updatePayload),
+                });
+
+                if (res && res.ok) {
+                    showToast(res.message || "Đã cập nhật khóa thành công!", "success");
+                    await loadGeminiKeys();
+                    await loadDiagnostics();
+                } else {
+                    feedbackBox.className = "key-test-feedback-box error";
+                    feedbackBox.innerText = "❌ " + (res?.detail || "Không thể cập nhật khóa.");
+                }
+            } catch (err) {
+                feedbackBox.className = "key-test-feedback-box error";
+                feedbackBox.innerText = "❌ Lỗi: " + err.message;
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = origSaveText;
+            }
+        }
+    };
+
+    // 4. Logic nút Kích hoạt / Sử dụng (cho khóa dự phòng)
+    const activateBtn = card.querySelector(".btn-activate-key-row");
+    if (activateBtn) {
+        activateBtn.onclick = async () => {
+            try {
+                const res = await apiFetch(`/api/settings/gemini-keys/${encodeURIComponent(item.id)}/active`, {
+                    method: "POST",
+                });
+                if (res && res.ok) {
+                    showToast(`✅ Đã chuyển sang sử dụng "${item.name}"!`, "success");
+                    await loadGeminiKeys();
+                    await loadDiagnostics();
+                } else {
+                    alert("Lỗi: " + (res?.detail || "Không thể kích hoạt khóa."));
+                }
+            } catch (err) {
+                alert("Lỗi: " + err.message);
+            }
+        };
+    }
+
+    // 5. Logic nút Xóa khóa
+    const deleteBtn = card.querySelector(".btn-delete-key-row");
+    if (deleteBtn) {
+        deleteBtn.onclick = async () => {
+            const confirmed = confirm(`Bạn có chắc chắn muốn xóa khóa "${item.name}" khỏi Windows Credential Locker?`);
+            if (!confirmed) return;
+
+            try {
+                const res = await apiFetch(`/api/settings/gemini-keys/${encodeURIComponent(item.id)}`, {
+                    method: "DELETE",
+                });
+                if (res && res.ok) {
+                    showToast(`🗑️ Đã xóa khóa "${item.name}"`, "info");
+                    await loadGeminiKeys();
+                    await loadDiagnostics();
+                } else {
+                    alert("Lỗi: " + (res?.detail || "Không thể xóa khóa."));
+                }
+            } catch (err) {
+                alert("Lỗi: " + err.message);
+            }
+        };
+    }
+
+    // 6. Logic nút Hủy (cho ô thêm mới chưa lưu)
+    const cancelBtn = card.querySelector(".btn-cancel-key-row");
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
+            card.remove();
+            const container = document.getElementById("key-rows-container");
+            if (container && container.querySelectorAll(".key-row-card").length === 0) {
+                loadGeminiKeys();
+            }
+        };
+    }
+
+    return card;
 }
 
 
@@ -1160,7 +1543,10 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (state.currentScreen === "memories") loadMemories();
             if (state.currentScreen === "reminders") loadReminders();
             if (state.currentScreen === "audit") loadAuditLogs();
-            if (state.currentScreen === "settings") loadDiagnostics();
+            if (state.currentScreen === "settings") {
+                loadDiagnostics();
+                loadGeminiKeys();
+            }
         };
     });
 
@@ -1279,23 +1665,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (btnRefreshAudit) btnRefreshAudit.onclick = loadAuditLogs;
 
     // 9. Sự kiện màn hình Cài đặt & Chẩn đoán
+    const btnAddKeyTop = document.getElementById("btn-add-key-top");
+    if (btnAddKeyTop) btnAddKeyTop.onclick = addNewKeyRow;
 
-    const btnSaveKey = document.getElementById("btn-save-key");
-    if (btnSaveKey) btnSaveKey.onclick = saveGeminiKey;
+    const btnAddKeyRow = document.getElementById("btn-add-key-row");
+    if (btnAddKeyRow) btnAddKeyRow.onclick = addNewKeyRow;
 
-    const btnToggleEye = document.getElementById("btn-toggle-key-visibility");
-    if (btnToggleEye) {
-        btnToggleEye.onclick = () => {
-            const keyInp = document.getElementById("input-gemini-key");
-            if (keyInp.type === "password") {
-                keyInp.type = "text";
-                btnToggleEye.innerText = "🔒";
-            } else {
-                keyInp.type = "password";
-                btnToggleEye.innerText = "👁️";
-            }
-        };
-    }
+    const btnRefreshKeys = document.getElementById("btn-refresh-keys");
+    if (btnRefreshKeys) btnRefreshKeys.onclick = loadGeminiKeys;
 
     const btnRefreshDiag = document.getElementById("btn-refresh-diagnostics");
     if (btnRefreshDiag) btnRefreshDiag.onclick = loadDiagnostics;
@@ -1372,5 +1749,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     loadConversations();
+    loadGeminiKeys();
     connectWebSocket();
 });

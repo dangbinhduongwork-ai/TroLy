@@ -17,7 +17,7 @@ import sys
 from typing import Any
 
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Security, UploadFile, WebSocket, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
@@ -35,6 +35,11 @@ from assistant.server.schemas import (
     ConversationUpdate,
     DiagnosticsResponse,
     FileUploadResponse,
+    GeminiKeyCreateRequest,
+    GeminiKeyItem,
+    GeminiKeysResponse,
+    GeminiKeyTestRequest,
+    GeminiKeyUpdateRequest,
     HotkeyUpdateRequest,
     KeyUpdateRequest,
     MemoryCreate,
@@ -50,9 +55,31 @@ from assistant.server.schemas import (
 from assistant.logging_setup import SecretFilter
 from assistant.server.ws import ChatWebSocketManager
 
-_session_token: str = secrets.token_urlsafe(32)
-SecretFilter.register_secret(_session_token)
+def _load_or_create_session_token() -> str:
+    """Nạp session token từ file dữ liệu bảo mật hoặc sinh mới nếu chưa có."""
+    from assistant.config import _get_default_data_dir
 
+    data_dir = _get_default_data_dir()
+    token_file = data_dir / "session.token"
+    try:
+        if token_file.is_file():
+            stored = token_file.read_text(encoding="utf-8").strip()
+            if len(stored) >= 32:
+                return stored
+    except Exception:
+        pass
+
+    new_token = secrets.token_urlsafe(32)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(new_token, encoding="utf-8")
+    except Exception:
+        pass
+    return new_token
+
+
+_session_token: str = _load_or_create_session_token()
+SecretFilter.register_secret(_session_token)
 
 
 def get_current_session_token() -> str:
@@ -66,6 +93,14 @@ def set_current_session_token(token: str) -> None:
     global _session_token
     _session_token = token
     SecretFilter.register_secret(token)
+    try:
+        from assistant.config import _get_default_data_dir
+
+        data_dir = _get_default_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "session.token").write_text(token, encoding="utf-8")
+    except Exception:
+        pass
 
 
 
@@ -386,6 +421,15 @@ def create_app(
         except Exception:
             pass
 
+        gemini_models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+        if gemini_reachable and hasattr(app_router.gemini_provider, "list_models"):
+            try:
+                available = await app_router.gemini_provider.list_models()
+                if available:
+                    gemini_models = available
+            except Exception:
+                pass
+
         return {
             "gemini_configured": gemini_configured,
             "gemini_key_source": gemini_key_source,
@@ -394,25 +438,125 @@ def create_app(
             "ollama_models": ollama_models,
             "mode": app_router.mode,
             "gemini_model": app_config.gemini_model,
+            "gemini_models": gemini_models,
             "local_model": app_config.local_model,
             "autostart_enabled": is_autostart_enabled(),
             "workspace_dir": str(app_config.workspace_dir),
             "timezone": app_config.timezone,
         }
 
+    @app.get("/api/settings/gemini-keys", response_model=GeminiKeysResponse, dependencies=[Depends(require_session_token)])
+    async def list_gemini_keys() -> dict[str, Any]:
+        """Lấy danh sách các Gemini API Keys đã lưu dưới dạng đã che giấu."""
+        from assistant.llm.gemini_provider import get_gemini_api_keys, mask_api_key
+
+        keys = get_gemini_api_keys()
+        masked_items: list[dict[str, Any]] = []
+        active_id = None
+        for k in keys:
+            is_act = bool(k.get("is_active", False))
+            if is_act:
+                active_id = k.get("id")
+            masked_items.append({
+                "id": k.get("id", ""),
+                "name": k.get("name", "Khóa"),
+                "masked_key": mask_api_key(k.get("key", "")),
+                "created_at": k.get("created_at", ""),
+                "is_active": is_act,
+            })
+        return {"ok": True, "keys": masked_items, "active_id": active_id}
+
+    @app.post("/api/settings/gemini-keys", dependencies=[Depends(require_session_token)])
+    async def create_gemini_key(req: GeminiKeyCreateRequest) -> dict[str, Any]:
+        """Thêm một Gemini API Key mới vào Windows Credential Manager."""
+        from assistant.llm.gemini_provider import add_gemini_api_key
+
+        clean_key = req.api_key.strip().strip("\"'")
+        if not clean_key:
+            raise HTTPException(status_code=400, detail="Khóa API Key không được để trống")
+
+        try:
+            item = add_gemini_api_key(clean_key, req.name or "")
+            return {
+                "ok": True,
+                "message": f"Đã lưu thành công '{item['name']}' vào Windows Credential Manager!",
+                "key_id": item["id"],
+            }
+        except Exception as err:
+            raise HTTPException(status_code=500, detail=f"Lỗi lưu khóa: {err}")
+
+    @app.put("/api/settings/gemini-keys/{key_id}", dependencies=[Depends(require_session_token)])
+    async def update_gemini_key_endpoint(key_id: str, req: GeminiKeyUpdateRequest) -> dict[str, Any]:
+        """Cập nhật tên hoặc giá trị của khóa Gemini API đã lưu."""
+        from assistant.llm.gemini_provider import update_gemini_api_key
+
+        try:
+            item = update_gemini_api_key(key_id, api_key=req.api_key, name=req.name)
+            return {
+                "ok": True,
+                "message": f"Đã cập nhật khóa '{item['name']}' thành công!",
+                "key_id": item["id"],
+            }
+        except Exception as err:
+            raise HTTPException(status_code=400, detail=str(err))
+
+    @app.post("/api/settings/gemini-keys/{key_id}/active", dependencies=[Depends(require_session_token)])
+    async def set_active_key(key_id: str) -> dict[str, Any]:
+        """Chọn một khóa làm khóa hoạt động chính."""
+        from assistant.llm.gemini_provider import set_active_gemini_api_key
+
+        ok = set_active_gemini_api_key(key_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Không tìm thấy khóa được chỉ định")
+        return {"ok": True, "message": "Đã chuyển sang sử dụng khóa này thành công!"}
+
+    @app.delete("/api/settings/gemini-keys/{key_id}", dependencies=[Depends(require_session_token)])
+    async def remove_gemini_key(key_id: str) -> dict[str, Any]:
+        """Xóa một Gemini API Key khỏi danh sách."""
+        from assistant.llm.gemini_provider import delete_gemini_api_key
+
+        ok = delete_gemini_api_key(key_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Không tìm thấy khóa để xóa")
+        return {"ok": True, "message": "Đã xóa khóa thành công!"}
+
+    @app.post("/api/settings/gemini-keys/test", dependencies=[Depends(require_session_token)])
+    async def test_key_endpoint(req: GeminiKeyTestRequest) -> dict[str, Any]:
+        """Kiểm tra xem khóa Gemini API có hoạt động với Google hay không."""
+        from assistant.llm.gemini_provider import (
+            get_gemini_api_keys,
+            test_gemini_api_key_connectivity,
+        )
+
+        target_key = ""
+        if req.api_key and req.api_key.strip():
+            target_key = req.api_key.strip().strip("\"'")
+        elif req.key_id:
+            keys = get_gemini_api_keys()
+            for k in keys:
+                if k.get("id") == req.key_id:
+                    target_key = k.get("key", "")
+                    break
+
+        if not target_key:
+            raise HTTPException(status_code=400, detail="Vui lòng cung cấp khóa API hoặc chọn khóa cần kiểm tra")
+
+        success, msg = test_gemini_api_key_connectivity(target_key)
+        return {"ok": success, "message": msg}
+
     @app.post("/api/settings/gemini-key", dependencies=[Depends(require_session_token)])
     async def set_gemini_key(req: KeyUpdateRequest) -> dict[str, Any]:
         """Lưu Gemini API Key an toàn vào Windows Credential Manager bằng keyring."""
-        import keyring
-        new_key = req.api_key.strip()
+        from assistant.llm.gemini_provider import add_gemini_api_key
+        new_key = req.api_key.strip().strip("\"'")
         if not new_key:
             raise HTTPException(status_code=400, detail="Khóa API Key không được để trống")
 
         try:
+            import keyring
             keyring.set_password("TroLyAI", "GEMINI_API_KEY", new_key)
             SecretFilter.register_secret(new_key)
-            # Khởi tạo lại client của Gemini provider
-            app_router.gemini_provider._client = None
+            add_gemini_api_key(new_key, "Khóa chính")
             return {"ok": True, "message": "Đã lưu Gemini API Key an toàn vào Windows Credential Manager!"}
         except Exception as err:
             raise HTTPException(status_code=500, detail=f"Lỗi lưu trữ Windows Credential Manager: {err}")
@@ -430,7 +574,10 @@ def create_app(
         if not new_model:
             raise HTTPException(status_code=400, detail="Tên model không được để trống")
 
-        app_config.local_model = new_model
+        try:
+            object.__setattr__(app_config, "local_model", new_model)
+        except Exception:
+            pass
         if hasattr(app_router.ollama_provider, "set_model"):
             app_router.ollama_provider.set_model(new_model)
 
@@ -458,6 +605,45 @@ def create_app(
             pass
 
         return {"ok": True, "local_model": app_config.local_model}
+
+    @app.post("/api/settings/gemini-model", dependencies=[Depends(require_session_token)])
+    async def update_gemini_model(req: dict[str, Any]) -> dict[str, Any]:
+        """Cập nhật mô hình Google Gemini đang hoạt động."""
+        new_model = str(req.get("gemini_model", "")).strip()
+        if not new_model:
+            raise HTTPException(status_code=400, detail="Tên model Gemini không được để trống")
+
+        try:
+            object.__setattr__(app_config, "gemini_model", new_model)
+        except Exception:
+            pass
+        if hasattr(app_router.gemini_provider, "set_model"):
+            app_router.gemini_provider.set_model(new_model)
+
+        # Cập nhật vào config/settings.toml nếu có để ghi nhớ
+        try:
+            candidate_paths = [
+                Path("config/settings.toml"),
+                Path(__file__).resolve().parent.parent.parent / "config" / "settings.toml",
+            ]
+            if getattr(sys, "frozen", False):
+                exe_dir = Path(sys.executable).parent
+                candidate_paths.insert(0, exe_dir / "config" / "settings.toml")
+
+            for settings_path in candidate_paths:
+                if settings_path.is_file():
+                    content = settings_path.read_text(encoding="utf-8")
+                    updated = re.sub(
+                        r'gemini_model\s*=\s*["\'][^"\']*["\']',
+                        f'gemini_model = "{new_model}"',
+                        content,
+                    )
+                    settings_path.write_text(updated, encoding="utf-8")
+                    break
+        except Exception:
+            pass
+
+        return {"ok": True, "gemini_model": app_config.gemini_model}
 
     @app.post("/api/settings/autostart", dependencies=[Depends(require_session_token)])
     async def update_autostart(req: AutostartUpdateRequest) -> dict[str, Any]:
@@ -497,20 +683,61 @@ def create_app(
     # =========================================================================
 
     @app.post("/api/upload-file", response_model=FileUploadResponse, dependencies=[Depends(require_session_token)])
-    async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    async def upload_file(request: Request) -> dict[str, Any]:
         """Tải tệp tin lên thư mục làm việc an toàn (Workspace) qua Kéo-Thả.
 
+        - Hỗ trợ cả python-multipart (nếu có) và fallback thuần Python (email/MIME tiêu chuẩn).
         - Kiểm tra tên tệp an toàn, chống path traversal bằng resolve_in_workspace().
         - Giới hạn kích thước tối đa 25MB (25 * 1024 * 1024 bytes).
-        - Ghi tệp an toàn theo từng khối (chunk) vào workspace_dir.
+        - Ghi tệp an toàn vào workspace_dir.
         """
         from assistant.safety.paths import PathSecurityError, resolve_in_workspace
 
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="Tên tệp không được để trống.")
+        max_bytes = 25 * 1024 * 1024
+        filename: str | None = None
+        file_bytes: bytes | None = None
+        file_stream: Any = None
+
+        # 1. Thử phân tích form data nếu thư viện python-multipart đã cài đặt
+        try:
+            form = await request.form()
+            file_obj = form.get("file")
+            if file_obj and hasattr(file_obj, "filename"):
+                filename = file_obj.filename
+                file_stream = file_obj
+        except Exception:
+            pass
+
+        # 2. Fallback: Tự phân tích multipart/form-data thuần Python bằng thư viện chuẩn email
+        if filename is None:
+            content_type = request.headers.get("content-type", "")
+            if "multipart/form-data" in content_type:
+                raw_body = await request.body()
+                if len(raw_body) > max_bytes + (64 * 1024):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Dung lượng tệp vượt quá giới hạn tối đa cho phép (25MB).",
+                    )
+                import email
+
+                header_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("latin1", errors="replace")
+                msg = email.message_from_bytes(header_bytes + raw_body)
+                for part in msg.walk():
+                    fn = part.get_filename()
+                    if fn:
+                        filename = fn
+                        payload = part.get_payload(decode=True)
+                        file_bytes = payload if isinstance(payload, bytes) else (payload.encode("utf-8") if payload else b"")
+                        break
+            elif request.headers.get("x-filename"):
+                filename = request.headers.get("x-filename")
+                file_bytes = await request.body()
+
+        if not filename:
+            raise HTTPException(status_code=400, detail="Tên tệp không được để trống hoặc không tìm thấy tệp tải lên.")
 
         # Lấy tên file gốc an toàn, loại bỏ tiền tố đường dẫn nguy hiểm
-        raw_name = Path(file.filename).name.strip()
+        raw_name = Path(filename).name.strip()
         if not raw_name:
             raise HTTPException(status_code=400, detail="Tên tệp không hợp lệ.")
 
@@ -519,29 +746,42 @@ def create_app(
         except PathSecurityError as err:
             raise HTTPException(status_code=400, detail=f"Tên tệp vi phạm an toàn bảo mật: {err}")
 
-        # Dung lượng tối đa: 25MB
-        max_bytes = 25 * 1024 * 1024
         total_size = 0
-
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with target_path.open("wb") as out_f:
-                while chunk := await file.read(64 * 1024):
-                    total_size += len(chunk)
-                    if total_size > max_bytes:
-                        out_f.close()
-                        if target_path.is_file():
-                            target_path.unlink(missing_ok=True)
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Dung lượng tệp vượt quá giới hạn tối đa cho phép (25MB).",
-                        )
-                    out_f.write(chunk)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.error("Lỗi khi ghi tệp tải lên: %s", exc)
-            raise HTTPException(status_code=500, detail=f"Lỗi ghi tệp lên đĩa: {exc}")
+
+        if file_bytes is not None:
+            total_size = len(file_bytes)
+            if total_size > max_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Dung lượng tệp vượt quá giới hạn tối đa cho phép (25MB).",
+                )
+            try:
+                target_path.write_bytes(file_bytes)
+            except Exception as exc:
+                logger.error("Lỗi khi ghi tệp tải lên: %s", exc)
+                raise HTTPException(status_code=500, detail=f"Lỗi ghi tệp lên đĩa: {exc}")
+        elif file_stream is not None:
+            try:
+                with target_path.open("wb") as out_f:
+                    while chunk := await file_stream.read(64 * 1024):
+                        total_size += len(chunk)
+                        if total_size > max_bytes:
+                            out_f.close()
+                            if target_path.is_file():
+                                target_path.unlink(missing_ok=True)
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Dung lượng tệp vượt quá giới hạn tối đa cho phép (25MB).",
+                            )
+                        out_f.write(chunk)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.error("Lỗi khi ghi tệp tải lên: %s", exc)
+                raise HTTPException(status_code=500, detail=f"Lỗi ghi tệp lên đĩa: {exc}")
+        else:
+            raise HTTPException(status_code=400, detail="Không tìm thấy dữ liệu tệp tải lên.")
 
         return {
             "ok": True,

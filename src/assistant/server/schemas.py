@@ -174,6 +174,45 @@ class KeyUpdateRequest(BaseModel):
     api_key: str = Field(min_length=1, description="Khóa Gemini API Key mới")
 
 
+class GeminiKeyItem(BaseModel):
+    """Thông tin một Gemini API Key hiển thị an toàn trên giao diện."""
+
+    id: str
+    name: str
+    masked_key: str
+    created_at: str
+    is_active: bool
+
+
+class GeminiKeysResponse(BaseModel):
+    """Danh sách các Gemini API Keys đã lưu."""
+
+    ok: bool = True
+    keys: list[GeminiKeyItem] = Field(default_factory=list)
+    active_id: str | None = None
+
+
+class GeminiKeyCreateRequest(BaseModel):
+    """Yêu cầu thêm Gemini API Key mới."""
+
+    api_key: str = Field(min_length=1, description="Khóa Gemini API Key mới")
+    name: str | None = Field(default="", description="Tên gợi nhớ cho khóa")
+
+
+class GeminiKeyUpdateRequest(BaseModel):
+    """Yêu cầu cập nhật Gemini API Key đã lưu (tên hoặc giá trị khóa)."""
+
+    api_key: str | None = Field(default=None, description="Khóa Gemini API Key mới nếu muốn đổi")
+    name: str | None = Field(default=None, description="Tên gợi nhớ mới cho khóa")
+
+
+class GeminiKeyTestRequest(BaseModel):
+    """Yêu cầu kiểm tra kết nối của một API Key."""
+
+    api_key: str | None = Field(default=None, description="Khóa API Key thô để kiểm tra")
+    key_id: str | None = Field(default=None, description="ID của khóa đã lưu cần kiểm tra")
+
+
 class ModelModeUpdateRequest(BaseModel):
     """Yêu cầu thay đổi chế độ định tuyến model."""
 
@@ -212,6 +251,7 @@ class DiagnosticsResponse(BaseModel):
     ollama_models: list[str] = Field(default_factory=list)
     mode: str
     gemini_model: str
+    gemini_models: list[str] = Field(default_factory=list)
     local_model: str
     autostart_enabled: bool
     workspace_dir: str

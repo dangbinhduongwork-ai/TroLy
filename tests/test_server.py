@@ -42,11 +42,17 @@ class MockServerProvider(LLMProvider):
     def __init__(self, response_text: str = "Xin chào từ Mock Server!", tool_calls: list[ToolCall] | None = None) -> None:
         self.response_text = response_text
         self.tool_calls = tool_calls or []
-        self.default_model = "mock-server-model"
 
     @property
     def provider_name(self) -> str:
         return "mock"
+
+    @property
+    def default_model(self) -> str:
+        return "mock-server-model"
+
+    async def is_available(self) -> bool:
+        return True
 
     async def stream_chat(
         self,
@@ -295,7 +301,7 @@ def test_websocket_approval_flow(tmp_path: Path) -> None:
     ws_dir = tmp_path / "workspace"
     ws_dir.mkdir(parents=True, exist_ok=True)
     target_file = ws_dir / "can_xoa.txt"
-    target_file.write_text("Dữ liệu thử")
+    target_file.write_text("Dữ liệu thử", encoding="utf-8")
 
     db_path = tmp_path / "test_approval.db"
     mem_store = MemoryStore(db_path=db_path)
@@ -393,23 +399,23 @@ def test_desktop_window_utilities() -> None:
         assert "--app=http://127.0.0.1:8000/?token=token123" in args
 
 
-def test_settings_api_endpoints(test_app_client: tuple[TestClient, str]) -> None:
+def test_settings_api_endpoints(test_app_client: tuple[TestClient, str, Any, Any]) -> None:
     """Kiểm tra các endpoint thiết lập và chẩn đoán bảo mật /api/settings/*."""
-    client, token = test_app_client
+    client, token, _, _ = test_app_client
     headers = {"X-Session-Token": token}
 
     # 1. GET /api/settings/diagnostics
-    with patch("assistant.server.app.check_gemini_key", return_value=(True, "Key hợp lệ", "gemini-2.5-flash")):
-        res = client.get("/api/settings/diagnostics", headers=headers)
-        assert res.status_code == 200
-        diag = res.json()
-        assert "gemini_status" in diag
-        assert "ollama_status" in diag
-        assert "mode" in diag
-        assert "is_autostart_enabled" in diag
+    res = client.get("/api/settings/diagnostics", headers=headers)
+    assert res.status_code == 200
+    diag = res.json()
+    assert "gemini_configured" in diag
+    assert "ollama_running" in diag
+    assert "mode" in diag
+    assert "gemini_models" in diag
+    assert "autostart_enabled" in diag
 
     # 2. POST /api/settings/gemini-key
-    with patch("assistant.main.store_gemini_key", return_value=True):
+    with patch("keyring.set_password", return_value=None):
         res = client.post(
             "/api/settings/gemini-key",
             headers=headers,
@@ -427,15 +433,34 @@ def test_settings_api_endpoints(test_app_client: tuple[TestClient, str]) -> None
     assert res.status_code == 200
     assert res.json()["mode"] == "local"
 
-    # 4. POST /api/settings/autostart
-    with patch("assistant.server.app.enable_autostart", return_value=True), patch("assistant.server.app.is_autostart_enabled", return_value=True):
+    # 4. POST /api/settings/gemini-model
+    res = client.post(
+        "/api/settings/gemini-model",
+        headers=headers,
+        json={"gemini_model": "gemini-2.0-flash"},
+    )
+    assert res.status_code == 200
+    assert res.json()["gemini_model"] == "gemini-2.0-flash"
+
+    # 5. POST /api/settings/local-model
+    res = client.post(
+        "/api/settings/local-model",
+        headers=headers,
+        json={"local_model": "qwen2.5:14b"},
+    )
+    assert res.status_code == 200
+    assert res.json()["local_model"] == "qwen2.5:14b"
+
+    # 6. POST /api/settings/autostart
+    with patch("assistant.desktop.autostart.enable_autostart", return_value=True), patch("assistant.desktop.autostart.is_autostart_enabled", return_value=True):
         res = client.post(
             "/api/settings/autostart",
             headers=headers,
             json={"enabled": True},
         )
         assert res.status_code == 200
-        assert res.json()["enabled"] is True
+        assert res.json()["ok"] is True
+        assert res.json()["autostart_enabled"] is True
 
 
 def test_websocket_chat_injects_memories(tmp_path: Path) -> None:
@@ -533,7 +558,7 @@ def test_status_endpoint_returns_real_usage_and_last_model(tmp_path: Path) -> No
     router.last_model_used = "qwen2.5:14b"
     # Giả lập ghi nhận 5 lượt gọi
     for _ in range(5):
-        router.usage_tracker.record_request()
+        router.usage_tracker.increment()
 
     token = "test_status_token"
     app = create_app(

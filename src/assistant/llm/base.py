@@ -100,10 +100,9 @@ class LLMProvider(ABC):
         ...
 
     @property
-    @abstractmethod
     def default_model(self) -> str:
         """Tên model mặc định được cấu hình cho provider."""
-        ...
+        return getattr(self, "_default_model", getattr(self, "_model_name", "default"))
 
     @abstractmethod
     def stream_chat(
@@ -120,7 +119,6 @@ class LLMProvider(ABC):
         """Liệt kê danh sách các model khả dụng từ provider này."""
         ...
 
-    @abstractmethod
     async def is_available(self) -> bool:
         """Kiểm tra nhanh xem provider có sẵn sàng nhận request hay không."""
-        ...
+        return True

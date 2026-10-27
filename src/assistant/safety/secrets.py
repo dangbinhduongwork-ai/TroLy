@@ -9,6 +9,8 @@ Tuân thủ nghiêm ngặt Nguyên tắc 3:
 import os
 import re
 
+from assistant.logging_setup import SecretFilter
+
 SERVICE_NAME = "TroLyAI"
 
 # Pattern nhận diện các khóa API dạng phổ biến (Google Gemini, OpenAI, Generic Hex/Base64)
@@ -19,7 +21,8 @@ def save_secret(key_name: str, secret_value: str, service: str = SERVICE_NAME) -
     """Lưu trữ khóa bí mật an toàn vào Windows Credential Manager."""
     import keyring
 
-    keyring.set_password(service, key_name, secret_value.strip())
+    cleaned = secret_value.strip().strip("\"'")
+    keyring.set_password(service, key_name, cleaned)
 
 
 def get_secret(key_name: str, service: str = SERVICE_NAME) -> str | None:
@@ -29,13 +32,17 @@ def get_secret(key_name: str, service: str = SERVICE_NAME) -> str | None:
 
         val = keyring.get_password(service, key_name)
         if val and val.strip():
-            return val.strip()
+            cleaned = val.strip().strip("\"'")
+            if cleaned:
+                return cleaned
     except Exception:
         pass
 
     env_val = os.getenv(key_name)
     if env_val and env_val.strip():
-        return env_val.strip()
+        cleaned = env_val.strip().strip("\"'")
+        if cleaned:
+            return cleaned
 
     return None
 

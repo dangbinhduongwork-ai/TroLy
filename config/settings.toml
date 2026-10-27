@@ -16,7 +16,7 @@ log_level = "INFO"
 
 [models]
 # Model đám mây qua Gemini API (khi có mạng)
-gemini_model = "gemini-2.5-flash"
+gemini_model = "gemini-2.0-flash"
 
 # Model cục bộ chạy qua Ollama (khi mất mạng hoặc dữ liệu nhạy cảm)
 local_model = "qwen2.5:14b"

@@ -372,8 +372,101 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
      - Kiểm thử API cấu hình phím tắt và vòng đời `GlobalHotkeyManager`.
 - **Lý do**:
   - Nâng cấp trải nghiệm người dùng tương tự các trợ lý AI Desktop cao cấp (Spotlight / Raycast), giữ vững 100% nguyên tắc an toàn, không rò rỉ bộ nhớ hay xung đột luồng.
-- **Thư viện mới**:
-  - `python-multipart>=0.0.9`: Thư viện chuẩn được FastAPI yêu cầu chính thức để xử lý form-data và file upload streaming.
+### [2026-10-27] Khắc phục lỗi Mô hình Gemini (404 Not Found), Cơ Chế Tự Phục Hồi Model & Fallback Cục Bộ
+- **Bối cảnh**:
+  - Khi người dùng gửi tin nhắn chat, Google Gemini API trả về lỗi:
+    `[UNKNOWN] Lỗi không xác định từ Gemini: 404 Not Found. {'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements.'}`
+  - Nguyên nhân: Google AI Studio đã chính thức ngừng hỗ trợ mô hình `gemini-2.5-flash` và chuyển sang `gemini-3.8-flash` (và các dòng `gemini-2.0-flash`, `gemini-1.5-flash`). Đồng thời trong cấu hình `settings.toml` và `config.py` vẫn giữ giá trị cũ `gemini-2.5-flash`.
+  - Bộ định tuyến `ModelRouter` ở chế độ `auto` trước đây chỉ bắt các lỗi mạng/429/5xx để fallback sang Ollama; các lỗi như 404 hoặc model ngừng hỗ trợ bị re-raise khiến khung chat hiển thị hộp đỏ lỗi không mong muốn.
+- **Phương án đã chọn**:
+  1. **Nâng cấp Cấu hình Mặc định**:
+     - Cập nhật `config/settings.toml` và `src/assistant/config.py`: đổi mô hình mặc định từ `gemini-2.5-flash` sang `gemini-3.8-flash`.
+  2. **Cơ chế Tự Phục Hồi Ứng Viên Mô Hình (Candidate Fallback Loop)** trong `GeminiProvider`:
+     - Khi gọi `generate_content_stream()`: định nghĩa danh sách mô hình dự phòng `[self._model_name, "gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]`.
+     - Nếu mô hình hiện tại gặp lỗi 404 / Model Not Found trước khi gửi token, hệ thống tự động thử tiếp ứng viên tiếp theo trong danh sách.
+     - Khi một model thành công, tự động cập nhật `self._model_name` để các lượt gọi sau sử dụng ngay mô hình đang hoạt động.
+  3. **Tự Động Fallback Sang Ollama Trong Chế Độ Auto** trong `ModelRouter`:
+     - Nếu Gemini gặp bất kỳ sự cố nào không thể phục hồi (kể cả 404, model lỗi hoặc hết số lần retry), ngoại trừ lỗi xác thực (`auth`) hoặc nội dung vi phạm bản quyền/an toàn (`content_blocked`), hệ thống tự động chuyển sang mô hình cục bộ Ollama (`qwen2.5:14b`) và thông báo cho người dùng `[Hệ thống: Đã chuyển sang model cục bộ vì...]` thay vì làm sập lượt chat.
+  4. **Cài Đặt & Lựa Chọn Mô Hình Trên Giao Diện Web**:
+     - Thêm endpoint `POST /api/settings/gemini-model` cập nhật model Gemini động và lưu vào `config/settings.toml`.
+     - Thêm trường `gemini_models` trong `GET /api/diagnostics` và `DiagnosticsResponse`.
+     - Bổ sung bộ chọn mô hình Gemini Cloud trong màn hình Cài đặt của Web UI (`#settings-select-gemini-model`).
+- **Lý do**:
+  - Đảm bảo ứng dụng luôn chạy mượt mà, tự chữa lành khi Google cập nhật hoặc khai tử các phiên bản mô hình, người dùng không bao giờ bị gián đoạn hay thấy lỗi đỏ trong chế độ Tự động.
+### [2026-10-27] Quản lý nhiều Gemini API Keys và Kiểm tra kết nối trực tiếp (Multi-Key Management & Connectivity Testing)
+- **Bối cảnh**:
+  - Người dùng sở hữu nhiều tài khoản Google AI Studio và muốn lưu nhiều Gemini API keys để dự phòng và xoay vòng khi chạm hạn mức (429 Rate Limit).
+  - Cần hiển thị từng khóa rõ ràng trong giao diện Cài đặt, có nút "Kiểm tra" (Test) để biết khóa còn sống hay bị từ chối/hết hạn trước khi chat.
+  - Phải tuân thủ nghiêm ngặt Nguyên tắc 3 (Không bao giờ ghi nhận hoặc trả về khóa thô không che giấu).
+- **Phương án đã chọn**:
+  1. **Lưu trữ an toàn qua Windows Credential Manager (`keyring`)**:
+     - Lưu danh sách keys dưới dạng JSON được mã hóa trong credential slot `GEMINI_API_KEYS_JSON` thuộc service `TroLyAI`.
+     - Đồng thời duy trì khóa đang active trong slot `GEMINI_API_KEY` để tương thích ngược 100% với các hàm sẵn có.
+     - Tự động di chuyển (migrate) khóa đơn lẻ cũ vào danh sách khi khởi chạy lần đầu.
+  2. **Bảo mật và che giấu hiển thị (Masking)**:
+     - Thêm hàm `mask_api_key()`: hiển thị định dạng an toàn `AIzaSy12...cdef`. Tuyệt đối không trả về full key qua API `GET`.
+     - Đăng ký mọi khóa vào `SecretFilter` để ngăn chặn rò rỉ ra log/console.
+  3. **Kiểm tra kết nối trực tiếp (Live Test)**:
+     - Viết hàm `test_gemini_api_key_connectivity()` sử dụng `google-genai` gọi `client.models.get(model="gemini-2.0-flash")`: kiểm tra tính hợp lệ và quyền truy cập API mà không tiêu tốn token chat.
+     - Cung cấp endpoint `POST /api/settings/gemini-keys/test` hỗ trợ kiểm tra cả khóa thô trước khi lưu và khóa đã lưu theo `key_id`.
+  4. **Giao diện Quản lý Khóa Hiện Đại**:
+     - Thêm form nhập tên/nhãn gợi nhớ + ô nhập key có nút toggle ẩn/hiện và nút kiểm tra thử.
+     - Hiển thị danh sách khóa với badge "Đang sử dụng" / "Dự phòng", nút "⚡ Sử Dụng", "🔍 Kiểm Tra" (kèm phản hồi thành công/lỗi ngay tại dòng) và "🗑️ Xóa".
+- **Lý do**:
+  - Đảm bảo tuân thủ triệt để Nguyên tắc 2, 3, 7, 8, 9, 10 và 11. Giúp người dùng chủ động kiểm soát tài nguyên đám mây và xử lý dứt điểm các sự cố liên quan đến API key.
+- **Thư viện mới**: Không có (tuân thủ Nguyên tắc 11).
 
+### [2026-10-27] Thiết kế Giao diện Quản lý Khóa API Động: Mỗi Khóa 1 Ô Nhập, Nút Kiểm Tra Kế Bên, Đầy Đủ Thêm/Sửa/Xóa
+- **Bối cảnh**:
+  - Người dùng muốn giao diện Quản lý Gemini API Keys đẹp, hiện đại, mỗi khóa là một thẻ riêng biệt với ô text box và nút "Kiểm tra" nằm ngay cạnh phải của ô.
+  - Khi bấm "Thêm khóa mới", một ô text box mới xuất hiện trực tiếp trong danh sách để dán key, bấm kiểm tra ngay lập tức, và lưu lại.
+  - Hỗ trợ đầy đủ các thao tác Thêm, Sửa (tên/khóa), Xóa và Kích hoạt khóa đang sử dụng.
+- **Phương án đã chọn**:
+  1. **Thiết kế Ô Text Box Nhập Liệu Động (Dynamic Rows Architecture)**:
+     - Thẻ `.gemini-keys-card` chứa danh sách `#key-rows-container`.
+     - Mỗi khóa được render thành một `.key-row-card`:
+       - Header: Tên gợi nhớ (editable input `.input-key-name`) và huy hiệu trạng thái (`● Đang sử dụng`, `Dự phòng`, `🆕 Mới (Chưa lưu)`).
+       - Main Input Group: Ô text box (`.input-key-secret`) có nút ẩn/hiện mật khẩu 👁️/🔒, và **nằm ngay sát bên phải là nút "🔍 Kiểm Tra"** (`.btn-test-key`).
+       - Bottom Actions: Nút "💾 Lưu" (hoặc "Lưu Thay Đổi"), "⚡ Sử Dụng" (chọn làm khóa chính), "🗑️ Xóa", hoặc "❌ Hủy Bỏ" (cho ô mới).
+       - Hộp thông báo phản hồi tại chỗ (`.key-test-feedback-box`): hiển thị kết quả kiểm tra xanh/đỏ mượt mà ngay dưới ô.
+  2. **Thêm Khóa Nhanh**:
+     - Bấm "➕ Thêm Khóa Mới" ở tiêu đề hoặc thanh chân thẻ sẽ tự động sinh thêm 1 ô nhập mới với viền nét đứt (dashed blue), cuộn tới và focus vào ô để người dùng dán key ngay.
+     - Có thể bấm nút "🔍 Kiểm Tra" kế bên để kiểm tra tính hợp lệ trước khi bấm "Lưu".
+  3. **Sửa & Xóa**:
+     - Người dùng có thể sửa trực tiếp tên gợi nhớ hoặc dán khóa mới đè lên ô text box rồi bấm "💾 Lưu Thay Đổi" (gọi `PUT /api/settings/gemini-keys/{id}`).
+     - Bấm "🗑️ Xóa" có hộp thoại xác nhận trước khi xóa vĩnh viễn khỏi Windows Credential Locker.
+  4. **Thẩm Mỹ Cao Cấp ("Làm Cho Đẹp")**:
+     - Bảng màu dark/light hài hòa, hiệu ứng đổ bóng subtle shadow, hiệu ứng hover nhấc nhẹ (transform translateY), nút kiểm tra xanh dương gradient nổi bật, nút lưu xanh ngọc lục bảo (emerald), nút xóa viền đỏ tinh tế.
+     - Thêm tham số cache-busting `?v=20261027_3` vào cả link CSS và thẻ script để trình duyệt Edge/Chrome lập tức nạp giao diện mới mà không bị dính cache cũ.
+### [2026-10-27] Khắc phục lỗi Khóa API biến mất khi bấm Lưu: Cơ chế Lưu trữ kép Dual Persistence & Schema Update linh hoạt
+- **Bối cảnh**:
+  - Người dùng phản ánh: "khi tôi bấm lưu thì nó lại mất không hiện danh sách khóa đã lưu là sao".
+  - Nguyên nhân kỹ thuật:
+    1. Khi gọi `keyring.set_password(KEYRING_SERVICE, KEYRING_KEYS_STORE, raw_json)` trên Windows Credential Manager, chuỗi JSON danh sách khóa có thể gặp giới hạn bộ nhớ đệm (buffer size) hoặc lỗi bảo mật của PasswordVault, dẫn đến việc nuốt ngoại lệ âm thầm (`except Exception: pass`). Do đó khi API GET được gọi lại, danh sách trả về rỗng và giao diện xóa sạch các ô thẻ đang hiển thị.
+    2. Endpoint `PUT /api/settings/gemini-keys/{id}` trước đó dùng `GeminiKeyCreateRequest` (bắt buộc phải có `api_key`). Khi người dùng chỉ sửa tên khóa hoặc bấm lưu cập nhật mà không nhập lại key thô, FastAPI từ chối với mã lỗi 422 Unprocessable Entity.
+- **Phương án đã chọn**:
+  1. **Cơ chế lưu trữ kép (Dual Persistence)**:
+     - Khóa vừa được lưu vào Windows Credential Locker (keyring) vừa được lưu đồng thời vào file dữ liệu bảo mật cục bộ `%APPDATA%\AIAssistant\gemini_keys.json` (thư mục riêng tư chỉ tài khoản Windows của người dùng mới có quyền truy cập).
+     - Khi đọc, nếu keyring trả về rỗng hoặc gặp lỗi, hệ thống tự động đọc từ file dự phòng và đồng bộ ngược lại vào keyring. Đảm bảo khóa đã lưu KHÔNG BAO GIỜ bị mất hoặc biến mất.
+  2. **Schema `GeminiKeyUpdateRequest`**:
+     - Cho phép `api_key: str | None = None` và `name: str | None = None`. Khi người dùng sửa tên hoặc sửa khóa, backend nhận diện chính xác và cập nhật linh hoạt, không còn bị lỗi 422.
+  3. **Tải dữ liệu phòng thủ trên giao diện**:
+     - Cập nhật `app.js` tự động tải danh sách khóa khi người dùng chuyển sang tab Cài đặt và ngay khi ứng dụng khởi chạy ban đầu.
+     - Tăng tham số cache busting lên `?v=20261027_5` để trình duyệt nạp ngay CSS/JS mới nhất.
+- **Lý do**:
+  - Tuân thủ triệt để Nguyên tắc 2 (An toàn bảo mật), Nguyên tắc 7 (Chất lượng mã nguồn & kiểm thử) và Nguyên tắc 10 (Xử lý dứt điểm điểm mơ hồ bằng phương án an toàn nhất).
 
-
+### [2026-10-27] Khắc phục cảnh báo WebSocket lặp vô hạn và Giữ Session Token bền vững (Persistent Session Token)
+- **Bối cảnh**:
+  - Khi khởi động lại máy chủ backend, token cũ bị thay mới dẫn đến các tab trình duyệt Edge đang mở trước đó bị từ chối kết nối (`Từ chối kết nối WebSocket do Session Token không hợp lệ`).
+  - Giao diện `app.js` khi nhận phản hồi đóng WebSocket từ chối (trước đó dùng mã `4003`) không nhận diện được lỗi xác thực nên rơi vào vòng lặp `setTimeout(connectWebSocket, 2000)` gọi kết nối lại liên tục mỗi 2 giây, làm ngập log máy chủ.
+- **Phương án đã chọn**:
+  1. **Lưu trữ Session Token bền vững**:
+     - Nạp và ghi nhớ token trong file bảo mật `%APPDATA%\AIAssistant\session.token`. Khi backend khởi động lại, token của người dùng được giữ nguyên vẹn, các tab trình duyệt đang mở không bao giờ bị văng kết nối đột ngột.
+  2. **Chuẩn hoá mã đóng WebSocket**:
+     - Trả về mã đóng chuẩn `1008` (Policy Violation / Unauthorized) theo RFC 6455 khi token không hợp lệ.
+  3. **Ngắt vòng lặp kết nối lại (Circuit Breaker)**:
+     - Trong `app.js`, khi phát hiện đóng kết nối với mã 1008 hoặc 4003, hiển thị thông báo rõ ràng yêu cầu người dùng F5 và **dừng ngay lập tức** việc tự động kết nối lại.
+     - Ưu tiên token truyền từ thanh địa chỉ URL `?token=...` rồi cập nhật vào `localStorage` để tab luôn sử dụng đúng token mới nhất.
+- **Lý do**:
+  - Tuân thủ Nguyên tắc 2 (Bảo mật), Nguyên tắc 9 (Bắt lỗi và báo lại rõ ràng bằng tiếng Việt) và Nguyên tắc 10 (Trải nghiệm mượt mà, không gây thắt cổ chai tài nguyên hệ thống).

@@ -18,15 +18,15 @@ class Config:
 
     workspace_dir: Path
     data_dir: Path
-    timezone: str
-    gemini_model: str
-    local_model: str
-    ollama_host: str
-    daily_soft_limit: int
-    max_context_tokens: int
-    network_cache_seconds: int
-    ui_port: int
-    log_level: str
+    timezone: str = "Asia/Ho_Chi_Minh"
+    gemini_model: str = "gemini-2.0-flash"
+    local_model: str = "qwen2.5:14b"
+    ollama_host: str = "http://127.0.0.1:11434"
+    daily_soft_limit: int = 1000
+    max_context_tokens: int = 4000
+    network_cache_seconds: int = 10
+    ui_port: int = 8000
+    log_level: str = "INFO"
     telegram_chat_id: str = ""
     embedding_model: str = "nomic-embed-text"
 
@@ -132,7 +132,7 @@ def load_config(
 
     # 4. models
     gemini_model = (
-        os.getenv("GEMINI_MODEL") or models_sec.get("gemini_model") or "gemini-2.5-flash"
+        os.getenv("GEMINI_MODEL") or models_sec.get("gemini_model") or "gemini-2.0-flash"
     )
     local_model = os.getenv("LOCAL_MODEL") or models_sec.get("local_model") or "qwen2.5:14b"
     ollama_host = (

@@ -41,6 +41,13 @@ class MockProvider(LLMProvider):
     def provider_name(self) -> str:
         return "mock"
 
+    @property
+    def default_model(self) -> str:
+        return "mock-model"
+
+    async def is_available(self) -> bool:
+        return True
+
     async def stream_chat(self, messages: list[Message], tools: list[dict] | None = None, system: str | None = None):
         yield StreamEvent(type="text_delta", content="OK")
 

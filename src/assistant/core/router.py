@@ -123,6 +123,9 @@ class DailyUsageTracker:
             self._cached_count = 0
         return self._cached_count
 
+    # Bí danh tiện ích cho increment
+    record_request = increment
+
 
 class ModelRouter:
     """Bộ điều phối luồng gọi model thông minh."""
@@ -264,22 +267,33 @@ class ModelRouter:
                         await asyncio.sleep(backoff_time)
                         continue
 
-                    # Đã thử hết số lần cho phép -> tự động fallback sang Ollama
-                    fallback_reason = err.message
-                    self.last_provider_used = self.ollama_provider.provider_name
-                    self.last_model_used = self.ollama_provider.default_model
+                # Mọi lỗi khác (bao gồm 404/model ngừng hỗ trợ hoặc khi đã thử hết số lần cho phép):
+                # Tự động fallback sang mô hình Ollama cục bộ trong chế độ auto
+                fallback_reason = err.message
+                self.last_provider_used = self.ollama_provider.provider_name
+                self.last_model_used = self.ollama_provider.default_model
 
-                    yield StreamEvent(
-                        type="text_delta",
-                        content=(
-                            f"[Hệ thống: Đã chuyển sang model cục bộ vì {fallback_reason}]\n\n"
-                        ),
-                    )
+                yield StreamEvent(
+                    type="text_delta",
+                    content=(
+                        f"[Hệ thống: Đã chuyển sang model cục bộ vì {fallback_reason}]\n\n"
+                    ),
+                )
+                try:
                     async for event in self.ollama_provider.stream_chat(messages, tools, system):
                         yield event
                     return
-
-                raise err
+                except Exception as ollama_err:
+                    yield StreamEvent(
+                        type="text_delta",
+                        content=(
+                            f"\n[Thông báo: Không thể hoàn tất vì kết nối Gemini gặp sự cố ({fallback_reason}) "
+                            f"và mô hình cục bộ Ollama cũng chưa được bật ({ollama_err}). "
+                            "Vui lòng kiểm tra lại mạng hoặc mở ứng dụng Ollama!]"
+                        ),
+                    )
+                    yield StreamEvent(type="done", content={"finish_reason": "stop"})
+                    return
 
     def _check_and_track_daily_limit(self) -> str | None:
         """Ghi nhận lượt gọi và cảnh báo khi gần đạt ngưỡng daily_soft_limit."""

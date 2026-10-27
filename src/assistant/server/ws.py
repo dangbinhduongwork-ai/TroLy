@@ -89,7 +89,7 @@ class ChatWebSocketManager:
         token = websocket.query_params.get("token") or websocket.headers.get("x-session-token", "")
         if not self.verify_token(token):
             logger.warning("Từ chối kết nối WebSocket do Session Token không hợp lệ.")
-            await websocket.close(code=4003, reason="Forbidden: Invalid Session Token")
+            await websocket.close(code=1008, reason="Forbidden: Invalid Session Token")
             return
 
         await websocket.accept()

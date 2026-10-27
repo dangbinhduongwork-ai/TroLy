@@ -35,11 +35,17 @@ class MockBriefingProvider(LLMProvider):
 
     def __init__(self, output: str) -> None:
         self.output = output
-        self.default_model = "mock-briefing"
 
     @property
     def provider_name(self) -> str:
         return "mock"
+
+    @property
+    def default_model(self) -> str:
+        return "mock-briefing"
+
+    async def is_available(self) -> bool:
+        return True
 
     async def stream_chat(
         self,

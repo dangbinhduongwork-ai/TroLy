@@ -35,12 +35,19 @@ class MockSubagentProvider(LLMProvider):
     def __init__(self, response_text: str = "", tool_calls: list[ToolCall] | None = None) -> None:
         self.response_text = response_text
         self.tool_calls = tool_calls or []
-        self.default_model = "mock-agent"
+        self._default_model = "mock-agent"
         self.received_tools: list[dict[str, Any]] = []
 
     @property
     def provider_name(self) -> str:
         return "mock"
+
+    @property
+    def default_model(self) -> str:
+        return self._default_model
+
+    async def is_available(self) -> bool:
+        return True
 
     async def stream_chat(
         self,

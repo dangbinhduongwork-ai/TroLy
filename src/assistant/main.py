@@ -181,7 +181,7 @@ def run_set_key() -> int:
     print("Lưu ý: Ký tự bạn nhập hoặc dán vào sẽ được ẩn để bảo mật.")
 
     try:
-        key = getpass.getpass("Nhập khóa Gemini API Key của bạn: ").strip()
+        key = getpass.getpass("Nhập khóa Gemini API Key của bạn: ").strip().strip("\"'")
     except (KeyboardInterrupt, EOFError):
         print("\n[ĐÃ HỦY] Thao tác bị người dùng hủy.")
         return 1

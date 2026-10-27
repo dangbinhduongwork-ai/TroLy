@@ -24,13 +24,20 @@ class MockProvider(LLMProvider):
 
     def __init__(self, name: str, mock_output: str) -> None:
         self._name = name
-        self.default_model = f"mock-{name}"
+        self._default_model = f"mock-{name}"
         self.mock_output = mock_output
         self.call_count = 0
 
     @property
     def provider_name(self) -> str:
         return self._name
+
+    @property
+    def default_model(self) -> str:
+        return self._default_model
+
+    async def is_available(self) -> bool:
+        return True
 
     async def stream_chat(
         self,

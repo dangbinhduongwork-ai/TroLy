@@ -21,7 +21,7 @@ if exist ".venv\Scripts\activate.bat" (
 python -c "import uvicorn" 2>nul
 if %ERRORLEVEL% neq 0 (
     echo [*] Chưa phát hiện gói uvicorn. Đang tự động cài đặt các phụ thuộc...
-    python -m pip install "uvicorn[standard]>=0.28.0" "fastapi>=0.110.0" "websockets>=12.0" "pystray>=0.19.5" "Pillow>=10.2.0" "apscheduler>=3.10.4,<4.0.0" "winotify>=1.1.0" "pypdf>=4.0.0" "python-docx>=1.1.0" "openpyxl>=3.1.0" "pyinstaller>=6.5.0"
+    python -m pip install "uvicorn[standard]>=0.28.0" "fastapi>=0.110.0" "websockets>=12.0" "pystray>=0.19.5" "Pillow>=10.2.0" "apscheduler>=3.10.4,<4.0.0" "winotify>=1.1.0" "pypdf>=4.0.0" "python-docx>=1.1.0" "openpyxl>=3.1.0" "python-multipart>=0.0.9" "pyinstaller>=6.5.0"
     if %ERRORLEVEL% neq 0 (
         echo [*] Đang thử cập nhật gói qua pyproject.toml...
         taskkill /F /IM assistant.exe 2>nul

@@ -330,3 +330,32 @@ def test_is_network_available(test_config: Config) -> None:
     router_offline = ModelRouter(config=test_config, network_checker=net_offline)
     assert router_offline.is_network_available() is False
 
+
+@pytest.mark.asyncio
+async def test_auto_gemini_404_fallback(test_config: Config) -> None:
+    """Kiểm tra khi Gemini gặp lỗi 404 (model ngừng hỗ trợ) -> tự động fallback sang Ollama."""
+    gemini = DummyProvider(
+        name="gemini",
+        default_model="gemini-2.5-flash",
+        error_to_raise=ProviderError("unknown", "Mô hình Gemini không khả dụng 404 Not Found"),
+    )
+    ollama = DummyProvider(name="ollama", default_model="qwen2.5:7b")
+    net = DummyNetworkChecker(is_online_val=True)
+
+    router = ModelRouter(
+        config=test_config,
+        gemini_provider=gemini,
+        ollama_provider=ollama,
+        network_checker=net,
+    )
+
+    events: list[StreamEvent] = []
+    messages = [Message(role="user", content="Test 404 fallback")]
+    async for event in router.stream_chat(messages):
+        events.append(event)
+
+    assert gemini.call_count == 1
+    assert ollama.call_count == 1
+    assert router.last_provider_used == "ollama"
+    assert any("Đã chuyển sang model cục bộ" in str(e.content) for e in events if e.type == "text_delta")
+
