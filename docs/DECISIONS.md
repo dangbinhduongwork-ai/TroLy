@@ -470,3 +470,29 @@ Tài liệu này ghi lại các quyết định kỹ thuật khi có điểm mơ
      - Ưu tiên token truyền từ thanh địa chỉ URL `?token=...` rồi cập nhật vào `localStorage` để tab luôn sử dụng đúng token mới nhất.
 - **Lý do**:
   - Tuân thủ Nguyên tắc 2 (Bảo mật), Nguyên tắc 9 (Bắt lỗi và báo lại rõ ràng bằng tiếng Việt) và Nguyên tắc 10 (Trải nghiệm mượt mà, không gây thắt cổ chai tài nguyên hệ thống).
+
+### [2026-10-27] Khắc phục lỗi Chat với Khóa Google AI Studio: Tự Động Kích Hoạt Khóa & Chuẩn Hóa Schema Công Cụ
+- **Bối cảnh**:
+  - Người dùng tạo khóa mới trên Google AI Studio, dán vào Cài đặt và bấm nút Kiểm tra báo kết nối thành công. Tuy nhiên khi sang khung Chat để trò chuyện thì liên tục báo lỗi không trả lời được.
+  - Nguyên nhân kỹ thuật phát hiện:
+    1. **Khóa mới thêm chưa được kích hoạt tự động (Active Key Mismatch)**: Hàm `add_gemini_api_key()` gán `is_active = len(keys) == 0`. Khi người dùng đã có khóa cũ (hoặc khóa không hợp lệ), khóa mới thêm bị gán `is_active = False` ("Dự phòng"). Khi vào Chat, hàm `get_gemini_api_key()` chỉ lấy khóa có `is_active=True` (chính là khóa cũ bị lỗi), dẫn đến việc người dùng chat bằng khóa cũ dù đã thêm khóa mới thành công.
+    2. **Kiểm tra kết nối chưa sát thực tế (Test vs Chat Mismatch)**: Nút "Kiểm tra" trước đó chỉ gọi `client.models.get(model=...)` (chỉ kiểm tra quyền đọc metadata mô hình) thay vì thử sinh văn bản qua `generate_content`.
+    3. **Không tương thích OpenAPI Schema của Gemini Function Calling**: Hàm sinh schema `generate_parameters_schema` sinh trường `"default": null`, mảng rỗng `required: []` hoặc `properties: {}` cho các công cụ không có tham số (ví dụ `get_system_info`). Chuẩn OpenAPI 3.0 của Gemini Function Calling từ chối trường `default` và các object schema rỗng gây lỗi `400 Bad Request`.
+    4. **Thiếu cơ chế fallback khi công cụ gặp lỗi**: Trong `GeminiProvider.stream_chat`, khi gọi `generate_content_stream` với danh sách 25+ công cụ bị lỗi schema hoặc hạn mức, hệ thống ngắt toàn bộ lượt chat thay vì tự động chuyển sang sinh văn bản thuần (text-only) cho người dùng.
+- **Phương án đã chọn**:
+  1. **Tự Động Kích Hoạt Khóa Mới & Khóa Vừa Cập Nhật**:
+     - Trong `add_gemini_api_key`: Khi thêm khóa mới, tự động đặt `is_active = True` và chuyển các khóa khác thành `is_active = False`.
+     - Trong `update_gemini_api_key`: Khi người dùng dán đè khóa mới vào ô đã có, tự động kích hoạt khóa đó thành khóa chính.
+     - Trong `app.js`: Khi bấm "Lưu Khóa" hoặc "Lưu Thay Đổi", giao diện hiển thị rõ ràng và tự động kích hoạt khóa chính. Nút "Kiểm Tra" có hướng dẫn bấm Lưu để kích hoạt.
+  2. **Kiểm Tra Thực Tế Khả Năng Sinh Văn Bản**:
+     - `test_gemini_api_key_connectivity` gọi trực tiếp `client.models.generate_content(model="gemini-2.0-flash", contents="1")` (dự phòng `gemini-1.5-flash`), đảm bảo khóa được kiểm tra khả năng chat thực tế 100%.
+  3. **Làm Sạch và Chuẩn Hóa Schema Công Cụ (`_clean_schema_for_gemini`)**:
+     - Triệt tiêu hoàn toàn trường `"default"` khỏi các tham số trong `FunctionDeclaration` cho Gemini.
+     - Tự động lược bỏ `"required"` nếu là mảng rỗng `[]`.
+     - Nếu một công cụ không có tham số (`properties` rỗng, ví dụ `get_system_info`), đặt `parameters = None` theo đúng đặc tả của Google GenAI SDK.
+  4. **Cơ Chế Phục Hồi Dự Phòng (Fallback to Text-Only)**:
+     - Trong `stream_chat`: Nếu lượt gọi kèm công cụ thất bại ngay từ đầu (do schema hoặc hạn mức tool calling), tự động thử lại ngay lượt đó ở chế độ không kèm công cụ để người dùng vẫn trò chuyện được câu trả lời thông suốt.
+     - Tiếp tục thử các ứng viên mô hình kế tiếp (`gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) khi gặp sự cố tương thích mô hình.
+- **Lý do**:
+  - Tuân thủ triệt để Nguyên tắc 2 (An toàn bảo mật), Nguyên tắc 6 (Thư viện chuẩn xác), Nguyên tắc 7 (Mã sạch & kiểm thử) và Nguyên tắc 9 (Không nuốt lỗi im lặng, phản hồi bằng tiếng Việt dễ hiểu).
+- **Thư viện mới**: Không có.

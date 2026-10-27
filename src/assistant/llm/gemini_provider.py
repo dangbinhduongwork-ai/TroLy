@@ -188,8 +188,8 @@ def save_gemini_api_keys(keys: list[dict[str, Any]]) -> None:
                 pass
 
 
-def add_gemini_api_key(api_key: str, name: str = "") -> dict[str, Any]:
-    """Thêm một Gemini API Key mới vào danh sách."""
+def add_gemini_api_key(api_key: str, name: str = "", set_active: bool = True) -> dict[str, Any]:
+    """Thêm một Gemini API Key mới vào danh sách. Mặc định tự động kích hoạt khóa mới thêm."""
     import uuid
     from datetime import datetime
 
@@ -200,15 +200,19 @@ def add_gemini_api_key(api_key: str, name: str = "") -> dict[str, Any]:
     keys = get_gemini_api_keys()
 
     key_id = f"key_{uuid.uuid4().hex[:8]}"
-    is_first = len(keys) == 0
     item_name = name.strip() if name and name.strip() else f"Khóa {len(keys) + 1}"
+
+    # Khi người dùng thêm khóa mới, tự động đặt làm khóa active chính
+    if set_active:
+        for k in keys:
+            k["is_active"] = False
 
     new_item = {
         "id": key_id,
         "name": item_name,
         "key": cleaned,
         "created_at": datetime.now().isoformat(),
-        "is_active": is_first,
+        "is_active": set_active or len(keys) == 0,
     }
     keys.append(new_item)
     save_gemini_api_keys(keys)
@@ -230,6 +234,9 @@ def update_gemini_api_key(
                 cleaned = api_key.strip().strip("\"'")
                 if cleaned and "..." not in cleaned:
                     item["key"] = cleaned
+                    # Tự động kích hoạt khóa khi vừa cập nhật giá trị bí mật mới
+                    for other in keys:
+                        other["is_active"] = (other.get("id") == key_id)
             save_gemini_api_keys(keys)
             return item
     raise ValueError(f"Không tìm thấy khóa với ID: {key_id}")
@@ -277,8 +284,12 @@ def test_gemini_api_key_connectivity(api_key: str) -> tuple[bool, str]:
         from google import genai
 
         client = genai.Client(api_key=cleaned)
-        # Kiểm tra thử model gemini-2.0-flash không tốn quota chat
-        client.models.get(model="gemini-2.0-flash")
+        # Thử gọi generate_content ngắn để kiểm tra chính xác tính khả dụng của chat
+        try:
+            client.models.generate_content(model="gemini-2.0-flash", contents="1")
+        except Exception:
+            # Dự phòng thử gemini-1.5-flash nếu gemini-2.0-flash chưa sẵn sàng
+            client.models.generate_content(model="gemini-1.5-flash", contents="1")
         return True, "Khóa Gemini API hoạt động rất tốt! Kết nối Google Gemini thành công."
     except Exception as err:
         p_err = classify_gemini_error(err)
@@ -612,13 +623,53 @@ class GeminiProvider(LLMProvider):
                 except Exception as err:
                     last_err = err
                     err_str = str(err).lower()
-                    is_404 = "404" in err_str or "not_found" in err_str or "not found" in err_str
                     is_last = (cl_idx == len(clients_to_try) - 1 and idx == len(candidates) - 1)
-                    # Nếu chưa yield dữ liệu nào và lỗi 404, thử tiếp model kế tiếp hoặc client kế tiếp
-                    if not yielded_any and is_404 and not is_last:
-                        continue
-                    if is_last:
+
+                    # 1. Nếu có đính kèm công cụ và thất bại trước khi sinh chữ nào (do quyền hạn công cụ hoặc schema),
+                    # tự động thử lại model này ở chế độ thuần văn bản để người dùng vẫn chat được bình thường
+                    if getattr(generate_config, "tools", None) and not yielded_any:
+                        try:
+                            config_no_tools = types.GenerateContentConfig()
+                            if system:
+                                config_no_tools.system_instruction = system
+                            fallback_stream = await cl.aio.models.generate_content_stream(
+                                model=current_cand,
+                                contents=contents,
+                                config=config_no_tools,
+                            )
+                            async for chunk in fallback_stream:
+                                yielded_any = True
+                                if chunk.text:
+                                    yield StreamEvent(type="text_delta", content=chunk.text)
+                                usage_meta = getattr(chunk, "usage_metadata", None)
+                                if usage_meta:
+                                    prompt_tok = getattr(usage_meta, "prompt_token_count", 0) or 0
+                                    cand_tok = getattr(usage_meta, "candidates_token_count", 0) or 0
+                                    total_tok = getattr(usage_meta, "total_token_count", 0) or (prompt_tok + cand_tok)
+                                    yield StreamEvent(
+                                        type="usage",
+                                        content=Usage(
+                                            prompt_tokens=prompt_tok,
+                                            completion_tokens=cand_tok,
+                                            total_tokens=total_tok,
+                                        ),
+                                    )
+                            if yielded_any:
+                                self._model_name = current_cand
+                                yield StreamEvent(type="done", content={"finish_reason": "stop"})
+                                return
+                        except Exception:
+                            pass
+
+                    # 2. Nếu là lỗi xác thực (sai key hoàn toàn), dừng ngay và báo lỗi rõ ràng
+                    is_auth = any(k in err_str for k in ["401", "403", "api_key_invalid", "permission_denied", "unauthenticated", "unauthorized"])
+                    if is_auth:
                         raise classify_gemini_error(err) from err
+
+                    # 3. Nếu chưa yield dữ liệu nào và chưa phải lượt thử cuối, tiếp tục thử candidate model tiếp theo
+                    if not yielded_any and not is_last:
+                        continue
+
                     raise classify_gemini_error(err) from err
 
         if last_err:

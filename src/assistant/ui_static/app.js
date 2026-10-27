@@ -1059,8 +1059,8 @@ function createKeyRowElement(item, isNew = false) {
     const statusBadgeHtml = isNew
         ? `<span class="key-status-badge new">🆕 Mới (Chưa lưu)</span>`
         : (item.is_active
-            ? `<span class="key-status-badge active">● Đang sử dụng</span>`
-            : `<span class="key-status-badge standby">● Dự phòng</span>`);
+            ? `<span class="key-status-badge active">⚡ Đang dùng cho Chat</span>`
+            : `<span class="key-status-badge standby">💤 Dự phòng</span>`);
 
     const iconHtml = isNew ? "✨" : (item.is_active ? "🟢" : "🔵");
 
@@ -1158,7 +1158,7 @@ function createKeyRowElement(item, isNew = false) {
         testBtn.disabled = true;
         testBtn.innerHTML = `<span>⏳</span> Đang thử...`;
         feedbackBox.className = "key-test-feedback-box loading";
-        feedbackBox.innerText = "Đang kết nối và xác thực với Google Gemini...";
+        feedbackBox.innerText = "Đang kết nối và kiểm tra sinh thử văn bản với Google Gemini...";
 
         try {
             const res = await apiFetch("/api/settings/gemini-keys/test", {
@@ -1169,7 +1169,7 @@ function createKeyRowElement(item, isNew = false) {
 
             if (res && res.ok) {
                 feedbackBox.className = "key-test-feedback-box success";
-                feedbackBox.innerText = "✅ " + res.message;
+                feedbackBox.innerHTML = `✅ ${escapeHtml(res.message)}<br><small style="color:var(--text-secondary);display:inline-block;margin-top:5px;">👉 Khóa đã hoạt động tốt! Hãy bấm nút <strong>💾 ${isNew ? 'Lưu Khóa' : 'Lưu Thay Đổi'}</strong> bên dưới để kích hoạt cho trò chuyện.</small>`;
             } else {
                 feedbackBox.className = "key-test-feedback-box error";
                 feedbackBox.innerText = "❌ " + (res?.message || res?.detail || "Khóa không hợp lệ hoặc lỗi mạng.");
@@ -1211,7 +1211,14 @@ function createKeyRowElement(item, isNew = false) {
                 });
 
                 if (res && res.ok) {
-                    showToast(res.message || "Đã lưu khóa thành công!", "success");
+                    if (res.key_id) {
+                        try {
+                            await apiFetch(`/api/settings/gemini-keys/${encodeURIComponent(res.key_id)}/active`, { method: "POST" });
+                        } catch (e) {
+                            console.warn("Lỗi auto active key:", e);
+                        }
+                    }
+                    showToast("✅ Đã lưu và kích hoạt khóa chính cho Chat thành công!", "success");
                     await loadGeminiKeys();
                     await loadDiagnostics();
                 } else {
@@ -1253,7 +1260,12 @@ function createKeyRowElement(item, isNew = false) {
                 });
 
                 if (res && res.ok) {
-                    showToast(res.message || "Đã cập nhật khóa thành công!", "success");
+                    try {
+                        await apiFetch(`/api/settings/gemini-keys/${encodeURIComponent(item.id)}/active`, { method: "POST" });
+                    } catch (e) {
+                        console.warn("Lỗi auto active key:", e);
+                    }
+                    showToast("✅ Đã cập nhật và kích hoạt khóa chính cho Chat thành công!", "success");
                     await loadGeminiKeys();
                     await loadDiagnostics();
                 } else {

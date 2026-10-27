@@ -111,31 +111,32 @@ def test_multi_key_crud_lifecycle() -> None:
         assert k1["is_active"] is True
         assert get_gemini_api_key() == "AIzaSyKeyOne1111111111111111111111111"
 
-        # 3. Thêm key 2 (dự phòng, is_active=False)
-        k2 = add_gemini_api_key("AIzaSyKeyTwo2222222222222222222222222", "Khóa Dự Phòng 2")
-        assert k2["is_active"] is False
+        # 3. Thêm key 2 (tự động trở thành active mới nhất)
+        k2 = add_gemini_api_key("AIzaSyKeyTwo2222222222222222222222222", "Khóa AI Studio 2")
+        assert k2["is_active"] is True
         all_keys = get_gemini_api_keys()
         assert len(all_keys) == 2
-
-        # 4. Kích hoạt key 2
-        assert set_active_gemini_api_key(k2["id"]) is True
         assert get_gemini_api_key() == "AIzaSyKeyTwo2222222222222222222222222"
 
-        # 5. Xóa key 2 -> key 1 tự động được kích hoạt trở lại
-        assert delete_gemini_api_key(k2["id"]) is True
+        # 4. Kích hoạt lại key 1
+        assert set_active_gemini_api_key(k1["id"]) is True
+        assert get_gemini_api_key() == "AIzaSyKeyOne1111111111111111111111111"
+
+        # 5. Xóa key 1 -> key 2 tự động được kích hoạt trở lại
+        assert delete_gemini_api_key(k1["id"]) is True
         rem_keys = get_gemini_api_keys()
         assert len(rem_keys) == 1
-        assert rem_keys[0]["id"] == k1["id"]
+        assert rem_keys[0]["id"] == k2["id"]
         assert rem_keys[0]["is_active"] is True
-        assert get_gemini_api_key() == "AIzaSyKeyOne1111111111111111111111111"
+        assert get_gemini_api_key() == "AIzaSyKeyTwo2222222222222222222222222"
 
 
 def test_gemini_key_connectivity_success() -> None:
-    """Kiểm tra test_gemini_api_key_connectivity khi Google phản hồi thành công."""
+    """Kiểm tra test_gemini_api_key_connectivity khi Google phản hồi thành công qua generate_content."""
     with patch("google.genai.Client") as mock_client_cls:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
-        mock_client.models.get.return_value = MagicMock(name="models/gemini-2.0-flash")
+        mock_client.models.generate_content.return_value = MagicMock()
 
         ok, msg = test_gemini_api_key_connectivity("AIzaSyValidDummyKey123")
         assert ok is True
@@ -147,11 +148,41 @@ def test_gemini_key_connectivity_failure() -> None:
     with patch("google.genai.Client") as mock_client_cls:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
-        mock_client.models.get.side_effect = Exception("400 Bad Request: API_KEY_INVALID")
+        mock_client.models.generate_content.side_effect = Exception("400 Bad Request: API_KEY_INVALID")
 
         ok, msg = test_gemini_api_key_connectivity("AIzaSyBadKey")
         assert ok is False
         assert "không hợp lệ" in msg
+
+
+def test_clean_schema_for_gemini_compatibility() -> None:
+    """Kiểm tra _clean_schema_for_gemini loại bỏ 'default', làm sạch 'required', và xử lý properties rỗng."""
+    from assistant.llm.schema_adapters import _clean_schema_for_gemini, to_gemini_tools
+    from assistant.tools.registry import default_tool_registry
+
+    # 1. Properties rỗng -> trả về None
+    empty_schema = {"type": "object", "properties": {}, "required": []}
+    assert _clean_schema_for_gemini(empty_schema) is None
+
+    # 2. Schema có default và required rỗng
+    raw_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Đường dẫn file"},
+            "max_lines": {"type": "integer", "description": "Số dòng", "default": None},
+        },
+        "required": ["path"],
+    }
+    cleaned = _clean_schema_for_gemini(raw_schema)
+    assert cleaned is not None
+    assert "default" not in cleaned["properties"]["max_lines"]
+    assert cleaned["required"] == ["path"]
+
+    # 3. Tất cả công cụ trong default_tool_registry phải sinh ra schema hợp lệ cho Gemini
+    all_schemas = default_tool_registry.get_schemas()
+    assert len(all_schemas) > 0
+    tools_res = to_gemini_tools(all_schemas)
+    assert len(tools_res) == 1
 
 
 @pytest.mark.asyncio
@@ -195,7 +226,7 @@ async def test_server_gemini_keys_rest_endpoints(tmp_path) -> None:
         assert res.json()["ok"] is True
         key1_id = res.json()["key_id"]
 
-        # 2. Thêm key thứ hai
+        # 2. Thêm key thứ hai (tự động active)
         res2 = client.post(
             "/api/settings/gemini-keys",
             headers=headers,
@@ -209,10 +240,10 @@ async def test_server_gemini_keys_rest_endpoints(tmp_path) -> None:
         assert res_list.status_code == 200
         data = res_list.json()
         assert len(data["keys"]) == 2
-        assert data["active_id"] == key1_id
+        assert data["active_id"] == key2_id
 
-        # 4. Kích hoạt key 2
-        res_act = client.post(f"/api/settings/gemini-keys/{key2_id}/active", headers=headers)
+        # 4. Kích hoạt lại key 1
+        res_act = client.post(f"/api/settings/gemini-keys/{key1_id}/active", headers=headers)
         assert res_act.status_code == 200
         assert res_act.json()["ok"] is True
 
